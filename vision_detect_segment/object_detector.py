@@ -1,9 +1,11 @@
 import numpy as np
 import time
 import base64
+import os
 from typing import List, Dict, Optional, Tuple, Union
 import torch
 import supervision as sv
+from datetime import datetime
 
 from .object_segmenter import ObjectSegmenter
 from redis_robot_comm import RedisMessageBroker
@@ -80,9 +82,10 @@ class ObjectDetector:
         # Public configuration
         self.verbose = verbose
         self._config = config or VisionConfig()
-        
+
+        log_filename = os.path.join('log', f'object_detector_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
         # Setup logging
-        self._logger = setup_logging(verbose)
+        self._logger = setup_logging(verbose, log_filename)
         
         # Validate dependencies and load model
         try:

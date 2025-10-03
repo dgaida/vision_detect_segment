@@ -17,7 +17,7 @@ try:
     from sam2.sam2_image_predictor import SAM2ImagePredictor
     SAM2_AVAILABLE = True
 except (ModuleNotFoundError, ImportError) as e:
-    print("SAM2 module not installed or cannot be found!", e)
+    # print("SAM2 module not installed or cannot be found!", e)
     SAM2ImagePredictor = None
     SAM2_AVAILABLE = False
 

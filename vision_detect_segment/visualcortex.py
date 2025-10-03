@@ -24,7 +24,7 @@ class VisualCortex:
     """
 
     def __init__(self, objdetect_model_id: str, device: str = "auto", 
-                 stream_name: str = 'robot_camera', verbose: bool = True,
+                 stream_name: str = 'robot_camera', verbose: bool = False,
                  config: Optional[VisionConfig] = None):
         """
         Initialize the VisualCortex.

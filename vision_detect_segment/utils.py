@@ -44,7 +44,8 @@ def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> logg
     console_handler = logging.StreamHandler()
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    # do not add streamhandler as stdio interfers with MCP server communication
+    # logger.addHandler(console_handler)
     
     # File handler (optional)
     if log_file:
