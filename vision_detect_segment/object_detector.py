@@ -279,7 +279,7 @@ class ObjectDetector:
                     # Serialize mask for Redis
                     obj["mask_data"] = ObjectDetector._serialize_mask(mask_8u)
                     obj["has_mask"] = True
-                    obj["mask_shape"] = list(mask_8u.shape),  # [height, width]
+                    obj["mask_shape"] = list(mask_8u.shape)  # [height, width]
                     obj["mask_dtype"] = str(mask_8u.dtype)  # 'uint8'
                     masks.append(mask_binary)
                 else:
