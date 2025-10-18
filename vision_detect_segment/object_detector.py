@@ -8,6 +8,8 @@ import supervision as sv
 from datetime import datetime
 
 from .object_segmenter import ObjectSegmenter
+from .object_tracker import ObjectTracker
+
 from redis_robot_comm import RedisMessageBroker
 from .config import VisionConfig, MODEL_CONFIGS
 from .exceptions import (
@@ -52,7 +54,7 @@ class ObjectDetector:
     def __init__(self, device: str, model_id: str, object_labels: List[List[str]], 
                  redis_host: str = 'localhost', redis_port: int = 6379, 
                  stream_name: str = 'detected_objects', verbose: bool = False,
-                 config: Optional[VisionConfig] = None):
+                 config: Optional[VisionConfig] = None, enable_tracking: bool = True):
         """
         Initialize ObjectDetector.
 
@@ -65,6 +67,7 @@ class ObjectDetector:
             stream_name: Redis stream name for publishing detections
             verbose: Enable verbose logging
             config: Optional VisionConfig instance
+            enable_tracking:
         """
         # Private attributes
         self._device = get_optimal_device(prefer_gpu=(device != "cpu"))
@@ -101,7 +104,14 @@ class ObjectDetector:
             
             # Initialize segmenter
             self._segmenter = ObjectSegmenter(device=self._device, verbose=verbose)
-            
+
+            self._tracker = ObjectTracker(
+                model=self._model,
+                model_id=self._model_id,
+                enable_tracking=enable_tracking,
+                verbose=self.verbose
+            )
+
             # Initialize Redis broker
             try:
                 self._redis_broker = RedisMessageBroker(redis_host, redis_port)
@@ -142,7 +152,8 @@ class ObjectDetector:
 
     def detect_objects(self, image: np.ndarray, confidence_threshold: Optional[float] = None) -> List[Dict]:
         """
-        Main detection method - detects objects in an image.
+        Run object detection or tracking on the given image.
+        Returns a list of detections, optionally with track IDs.
         
         Args:
             image: Input image as numpy array
@@ -170,8 +181,12 @@ class ObjectDetector:
 
     def _detect_yolo(self, image: np.ndarray, threshold: float) -> List[Dict]:
         """Run YOLO-World detection."""
-        results = self._model.predict(image, max_det=20, conf=threshold, verbose=False)
-        
+        # results = self._model.predict(image, max_det=20, conf=threshold, verbose=False)
+        if self._tracker and self._tracker._use_yolo_tracker:
+            results = self._tracker.track(image, threshold)
+        else:
+            results = self._model.predict(image, conf=threshold, max_det=20, verbose=False)
+
         detected_objects = []
         boxes = results[0].boxes
         
@@ -222,6 +237,8 @@ class ObjectDetector:
                 target_sizes=[(h, w)],
                 threshold=threshold
             )
+            # results = self._tracker.track(image, threshold)
+
             labels = self._extract_owlv2_labels(results)
         else:  # grounding_dino
             results = self._processor.post_process_grounded_object_detection(
@@ -233,8 +250,40 @@ class ObjectDetector:
             )
             labels = results[0]['labels']
 
+            boxes = results[0]['boxes']
+            scores = results[0]['scores']
+
+            # detected_objects = []
+
+            # ✅ Tracking (optional)
+            if self._tracker and self._tracker.enable_tracking:
+                try:
+                    detections = sv.Detections(
+                        xyxy=boxes.cpu().numpy(),
+                        confidence=scores.cpu().numpy(),
+                        class_id=np.zeros(len(boxes), dtype=int)
+                    )
+                    tracked_detections = self._tracker.update_with_detections(detections)
+
+                    # Replace the boxes with tracked ones for visualization/publishing
+                    tracked_boxes = tracked_detections.xyxy
+                    track_ids = tracked_detections.tracker_id
+
+                    # Attach IDs to your object dicts
+                    detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
+                    for i, obj in enumerate(detected_objects):
+                        if i < len(track_ids):
+                            obj["track_id"] = int(track_ids[i])
+
+                except Exception as e:
+                    if self.verbose:
+                        self._logger.warning(f"Tracking update failed: {e}")
+                    detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
+            else:
+                detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
+
         # Convert to object dictionaries
-        detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
+        # detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
 
         # Create supervision detections
         self._create_supervision_detections_from_results(results[0], labels)

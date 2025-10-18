@@ -177,8 +177,8 @@ def create_test_config() -> VisionConfig:
     
     # Use only a subset of labels for faster testing
     test_labels = [
-        "blue square", "red square", "green square",
-        "blue circle", "red circle", "pen", "book"
+        "blue square", "chocolate bar", "mars",
+        "snickers", "red circle", "pen", "book"
     ]
     config.set_object_labels(test_labels)
     

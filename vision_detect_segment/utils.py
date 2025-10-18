@@ -18,45 +18,54 @@ from .exceptions import ImageProcessingError, ConfigurationError, DependencyErro
 def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> logging.Logger:
     """
     Set up logging configuration for the vision detection system.
-    
-    Args:
-        verbose: If True, set log level to DEBUG, otherwise INFO
-        log_file: Optional file path to write logs to
-        
-    Returns:
-        logging.Logger: Configured logger instance
+    Handles Unicode output gracefully on Windows consoles.
     """
-    logger = logging.getLogger('vision_detect_segment')
-    
+    import sys
+
+    logger = logging.getLogger("vision_detect_segment")
+
     # Avoid duplicate handlers
     if logger.handlers:
         return logger
-        
+
     level = logging.DEBUG if verbose else logging.INFO
     logger.setLevel(level)
-    
+
     # Create formatter
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
+
+    # ---- Handle console encoding problems (Windows cp1252 etc.) ----
+    try:
+        stream = sys.stdout
+        encoding = getattr(stream, "encoding", None)
+
+        # If Windows console with cp1252, wrap stream to use UTF-8 with replacement
+        if encoding is None or encoding.lower() in ["cp1252", "ansi_x3.4-1968"]:
+            import io
+            stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+        console_handler = logging.StreamHandler(stream)
+    except Exception:
+        # Fallback to default stream handler
+        console_handler = logging.StreamHandler()
+
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
-    # do not add streamhandler as stdio interfers with MCP server communication
-    # logger.addHandler(console_handler)
-    
-    # File handler (optional)
+
+    logger.addHandler(console_handler)
+
+    # ---- Optional file logging ----
     if log_file:
         try:
-            file_handler = logging.FileHandler(log_file)
+            file_handler = logging.FileHandler(log_file, encoding="utf-8", mode="a")
             file_handler.setLevel(level)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
         except Exception as e:
             logger.warning(f"Could not create log file {log_file}: {e}")
-    
+
     return logger
 
 
