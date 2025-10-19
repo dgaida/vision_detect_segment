@@ -207,8 +207,15 @@ class ObjectDetector:
             }
             detected_objects.append(obj_dict)
 
+        # Update supervision detections (with optional tracker IDs)
+        track_ids = None
+        if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
+            track_ids = results[0].boxes.id.cpu().numpy().astype(int)
+
+        self._create_supervision_detections(results, detected_objects, track_ids)
+
         # Update supervision detections
-        self._create_supervision_detections(results, detected_objects)
+        # self._create_supervision_detections(results, detected_objects)
         
         # Publish to Redis
         self._publish_detections(detected_objects, "yolo-world")
@@ -250,43 +257,45 @@ class ObjectDetector:
             )
             labels = results[0]['labels']
 
-            boxes = results[0]['boxes']
-            scores = results[0]['scores']
+        boxes = results[0]['boxes']
+        scores = results[0]['scores']
 
-            # detected_objects = []
+        # detected_objects = []
+        track_ids = None  # <--- wichtig, sonst Exception wenn Tracking aus ist
 
-            # ✅ Tracking (optional)
-            if self._tracker and self._tracker.enable_tracking:
-                try:
-                    detections = sv.Detections(
-                        xyxy=boxes.cpu().numpy(),
-                        confidence=scores.cpu().numpy(),
-                        class_id=np.zeros(len(boxes), dtype=int)
-                    )
-                    tracked_detections = self._tracker.update_with_detections(detections)
+        # ✅ Tracking (optional)
+        if self._tracker and self._tracker.enable_tracking:
+            # print("tracking")
+            try:
+                detections = sv.Detections(
+                    xyxy=boxes.cpu().numpy(),
+                    confidence=scores.cpu().numpy(),
+                    class_id=np.zeros(len(boxes), dtype=int)
+                )
+                tracked_detections = self._tracker.update_with_detections(detections)
 
-                    # Replace the boxes with tracked ones for visualization/publishing
-                    tracked_boxes = tracked_detections.xyxy
-                    track_ids = tracked_detections.tracker_id
+                # Replace the boxes with tracked ones for visualization/publishing
+                tracked_boxes = tracked_detections.xyxy
+                track_ids = tracked_detections.tracker_id
 
-                    # Attach IDs to your object dicts
-                    detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
-                    for i, obj in enumerate(detected_objects):
-                        if i < len(track_ids):
-                            obj["track_id"] = int(track_ids[i])
-
-                except Exception as e:
-                    if self.verbose:
-                        self._logger.warning(f"Tracking update failed: {e}")
-                    detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
-            else:
+                # Attach IDs to your object dicts
                 detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
+                for i, obj in enumerate(detected_objects):
+                    if i < len(track_ids):
+                        obj["track_id"] = int(track_ids[i])
+
+            except Exception as e:
+                if self.verbose:
+                    self._logger.warning(f"Tracking update failed: {e}")
+                detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
+        else:
+            detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
 
         # Convert to object dictionaries
         # detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
 
-        # Create supervision detections
-        self._create_supervision_detections_from_results(results[0], labels)
+        # Create supervision detections (with optional tracker IDs)
+        self._create_supervision_detections_from_results(results[0], labels, track_ids)
 
         # Add segmentation if available
         detected_objects = self._add_segmentation(detected_objects, image, results[0]['boxes'])
@@ -349,7 +358,7 @@ class ObjectDetector:
         """Serialize numpy mask to base64 string."""
         return base64.b64encode(mask.tobytes()).decode('utf-8')
 
-    def _create_supervision_detections(self, results, objects: List[Dict]):
+    def _create_supervision_detections(self, results, objects: List[Dict], track_ids: Optional[np.ndarray] = None):
         """Create supervision detections from YOLO results."""
         if not results[0].boxes:
             self._current_detections = None
@@ -359,11 +368,18 @@ class ObjectDetector:
         xyxy = boxes.xyxy.cpu().numpy()
         conf = boxes.conf.cpu().numpy()
         cls = boxes.cls.cpu().numpy().astype(int)
-        
-        self._current_detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
+
+        detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
+
+        if track_ids is not None:
+            detections.tracker_id = track_ids  # 🔥 wichtig: Track-IDs übernehmen
+
+        self._current_detections = detections
+        # self._current_detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
         self._current_labels = np.array([objects[i]["label"] for i in range(len(objects))])
 
-    def _create_supervision_detections_from_results(self, results: Dict, labels):
+    def _create_supervision_detections_from_results(self, results: Dict, labels,
+                                                    track_ids: Optional[np.ndarray] = None):
         """Create supervision detections from transformer results."""
         xyxy = results['boxes'].cpu().detach().numpy()
         conf = results['scores'].cpu().detach().numpy()
@@ -373,8 +389,12 @@ class ObjectDetector:
             cls = results['labels'].cpu().detach().numpy()
         else:  # grounding_dino
             cls = ObjectDetector._convert_labels_to_class_ids(labels)
-            
-        self._current_detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
+
+        detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
+        if track_ids is not None:
+            detections.tracker_id = track_ids
+        self._current_detections = detections
+        # self._current_detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
         self._current_labels = np.array([str(label) for label in labels])
 
     def _extract_owlv2_labels(self, results) -> np.ndarray:
@@ -466,10 +486,36 @@ class ObjectDetector:
         """Get current supervision detections."""
         return self._current_detections
         
+    # def get_label_texts(self) -> Optional[np.ndarray]:
+    #     """Get current detection labels."""
+    #     return self._current_labels
+
     def get_label_texts(self) -> Optional[np.ndarray]:
-        """Get current detection labels."""
-        return self._current_labels
-        
+        """Get current detection labels (with track IDs if available)."""
+        if self._current_detections is None or self._current_labels is None:
+            return None
+
+        labels = []
+        has_tracking = hasattr(self._current_detections,
+                               "tracker_id") and self._current_detections.tracker_id is not None
+
+        for i, label in enumerate(self._current_labels):
+            conf = None
+            if hasattr(self._current_detections, "confidence") and self._current_detections.confidence is not None:
+                conf = self._current_detections.confidence[i]
+
+            text = str(label)
+
+            if has_tracking and self._current_detections.tracker_id[i] is not None:
+                text += f" #{int(self._current_detections.tracker_id[i])}"
+
+            if conf is not None:
+                text += f" ({conf:.2f})"
+
+            labels.append(text)
+
+        return np.array(labels)
+
     def get_object_labels(self) -> List[List[str]]:
         """Get current object labels."""
         return self._object_labels
