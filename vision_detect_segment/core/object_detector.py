@@ -11,11 +11,13 @@ from .object_segmenter import ObjectSegmenter
 from .object_tracker import ObjectTracker
 
 from redis_robot_comm import RedisMessageBroker
-from .config import VisionConfig, MODEL_CONFIGS
-from .exceptions import (
-    ModelLoadError, DependencyError, handle_model_loading_error, handle_detection_error, handle_redis_error
+
+from ..utils.config import VisionConfig, MODEL_CONFIGS
+from ..utils.exceptions import (
+    ModelLoadError, DependencyError, handle_model_loading_error,
+    handle_detection_error, handle_redis_error
 )
-from .utils import (
+from ..utils.utils import (
     setup_logging, validate_model_requirements, get_optimal_device,
     Timer, validate_confidence_threshold
 )

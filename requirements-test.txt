@@ -1,0 +1,21 @@
+# Test dependencies for vision_detect_segment
+
+# Core testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+
+# Additional testing tools
+pytest-xdist>=3.0.0  # Parallel test execution
+pytest-timeout>=2.1.0  # Timeout for long-running tests
+
+# Code coverage
+coverage>=7.0.0
+
+# Mocking and fixtures
+responses>=0.20.0  # For mocking HTTP requests
+freezegun>=1.2.0  # For mocking time
+
+# Testing utilities
+fakeredis>=2.10.0  # For mocking Redis without server
+psutil>=5.9.0  # For memory usage tests

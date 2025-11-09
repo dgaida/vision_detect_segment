@@ -1,15 +1,14 @@
 import cv2
 import time
 from pathlib import Path
-import sys
 
-from vision_detect_segment.visualcortex import VisualCortex
-from vision_detect_segment.config import get_default_config, create_test_config
-from vision_detect_segment.utils import (
+from vision_detect_segment.core.visualcortex import VisualCortex
+from vision_detect_segment.utils.config import get_default_config, create_test_config
+from vision_detect_segment.utils.utils import (
     create_test_image, load_image_safe, format_detection_results,
     setup_logging, Timer
 )
-from vision_detect_segment.exceptions import (
+from vision_detect_segment.utils.exceptions import (
     VisionDetectionError, RedisConnectionError, DetectionError
 )
 from redis_robot_comm import RedisImageStreamer
@@ -23,7 +22,7 @@ def publish_test_image(stream_name: str = "robot_camera", use_test_config: bool 
         streamer = RedisImageStreamer(stream_name=stream_name)
 
         # Try to load example image, create test image if not found
-        image_path = Path("example.png")
+        image_path = Path("examples/example.png")
 
         if image_path.exists():
             image = load_image_safe(image_path)
@@ -225,7 +224,7 @@ def test_error_handling():
         # Test 1: Invalid model name
         logger.info("Testing invalid model error handling...")
         try:
-            visual_cortex = VisualCortex("invalid_model", device="auto", verbose=False)  # verbose=False to avoid noise
+            VisualCortex("invalid_model", device="auto", verbose=False)  # verbose=False to avoid noise
             logger.error("ERROR: Should have failed with invalid model")
             return False
         except VisionDetectionError as e:
@@ -240,7 +239,7 @@ def test_error_handling():
             config.redis.host = "invalid_host_12345"  # This should fail
 
             # This should still work but with Redis warning
-            visual_cortex = VisualCortex("owlv2", device="auto", verbose=False, config=config)
+            VisualCortex("owlv2", device="auto", verbose=False, config=config)
             logger.info("✓ VisualCortex initialized despite Redis issues (graceful degradation)")
 
         except VisionDetectionError as e:

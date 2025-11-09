@@ -8,7 +8,7 @@ try:
 except ImportError:
     from supervision.tracker.byte_tracker import ByteTrack
 
-from .exceptions import DetectionError
+from ..utils.exceptions import DetectionError
 
 
 class ObjectTracker:

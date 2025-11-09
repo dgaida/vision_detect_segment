@@ -4,11 +4,11 @@ import torch
 import supervision as sv
 from typing import Optional, Tuple
 
-from .config import VisionConfig
-from .exceptions import (
+from ..utils.config import VisionConfig
+from ..utils.exceptions import (
     SegmentationError, DependencyError, ModelLoadError, handle_model_loading_error
 )
-from .utils import (
+from ..utils.utils import (
     setup_logging, get_optimal_device, Timer, validate_image, clear_gpu_cache
 )
 

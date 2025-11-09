@@ -4,12 +4,11 @@ import torch
 import supervision as sv
 
 from .object_detector import ObjectDetector
-from redis_robot_comm import RedisImageStreamer
-from .config import VisionConfig, get_default_config
-from .exceptions import (
+from ..utils.config import VisionConfig, get_default_config
+from ..utils.exceptions import (
     ImageProcessingError, DetectionError, handle_redis_error, handle_detection_error
 )
-from .utils import (
+from ..utils.utils import (
     setup_logging, get_optimal_device, Timer, validate_image,
     resize_image, format_detection_results, clear_gpu_cache
 )
