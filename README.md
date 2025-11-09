@@ -7,6 +7,7 @@ A flexible Python package for real-time object detection and segmentation with R
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code Quality](https://github.com/dgaida/vision_detect_segment/actions/workflows/lint.yml/badge.svg)](https://github.com/dgaida/vision_detect_segment/actions/workflows/lint.yml)
+[![Tests](https://github.com/dgaida/vision_detect_segment/actions/workflows/tests.yml/badge.svg)](https://github.com/dgaida/vision_detect_segment/actions/workflows/tests.yml)
 [![CodeQL](https://github.com/dgaida/vision_detect_segment/actions/workflows/codeql.yml/badge.svg)](https://github.com/dgaida/vision_detect_segment/actions/workflows/codeql.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -359,17 +360,42 @@ pip install ultralytics   # For YOLO-World
 
 ```
 vision_detect_segment/
-├── main.py                      # Test script
-├── vision_detect_segment/       # Package code
+├── .github/
+│   └── workflows/
+│       ├── codeql.yml
+│       ├── dependency-review.yml
+│       ├── lint.yml
+│       └── release.yml
+├── examples/
+│   └── example.png              
+├── tests/
 │   ├── __init__.py
-│   ├── config.py               # Configuration management
-│   ├── exceptions.py           # Custom exceptions
-│   ├── utils.py                # Utility functions
-│   ├── object_detector.py      # Detection logic
-│   ├── object_segmenter.py     # Segmentation logic
-│   └── visualcortex.py        # Main interface
-├── tests/                      # Unit tests (TODO)
-└── pyproject.toml             # Package metadata
+│   ├── test_config.py
+│   ├── test_detector.py
+│   ├── test_segmenter.py
+│   ├── test_tracker.py
+│   ├── test_utils.py
+│   └── test_visualcortex.py
+├── vision_detect_segment/
+│   ├── __init__.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── object_detector.py
+│   │   ├── object_segmenter.py
+│   │   ├── object_tracker.py
+│   │   └── visualcortex.py
+│   └── utils/
+│       ├── __init__.py
+│       ├── config.py
+│       ├── exceptions.py
+│       └── utils.py
+├── .gitignore
+├── .pre-commit-config.yaml
+├── LICENSE
+├── main.py                      # Test script
+├── README.md
+├── pyproject.toml
+└── requirements.txt
 ```
 
 ### Running Tests

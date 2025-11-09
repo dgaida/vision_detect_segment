@@ -18,7 +18,7 @@ from vision_detect_segment.utils.utils import (
     clear_gpu_cache
 )
 from vision_detect_segment.utils.exceptions import (
-    ImageProcessingError, ConfigurationError, DependencyError
+    ImageProcessingError, ConfigurationError
 )
 
 

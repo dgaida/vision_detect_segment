@@ -13,6 +13,8 @@ from ..utils.utils import (
     resize_image, format_detection_results, clear_gpu_cache
 )
 
+from redis_robot_comm import RedisImageStreamer
+
 
 class VisualCortex:
     """
