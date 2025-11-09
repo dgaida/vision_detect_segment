@@ -77,12 +77,12 @@ def display_results(visual_cortex: VisualCortex, show_images: bool = True):
 
         # Print detection summary using utility function
         summary = format_detection_results(detected_objects, max_items=10)
-        logger.info(f"\n=== Detection Results ===")
+        logger.info("\n=== Detection Results ===")
         logger.info(summary)
 
         # Print processing statistics
         stats = visual_cortex.get_stats()
-        logger.info(f"\n=== Processing Statistics ===")
+        logger.info("\n=== Processing Statistics ===")
         for key, value in stats.items():
             logger.info(f"  {key}: {value}")
 
@@ -252,7 +252,7 @@ def test_error_handling():
         logger.info("Testing image processing error handling...")
         try:
             config = create_test_config()
-            visual_cortex = VisualCortex("owlv2", device="auto", verbose=False, config=config)
+            VisualCortex("owlv2", device="auto", verbose=False, config=config)
 
             # Test with invalid image (this should be handled gracefully)
             invalid_image = None

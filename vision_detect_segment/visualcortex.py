@@ -358,7 +358,7 @@ class VisualCortex:
                     self._img_work.copy(),
                     scale_factor=self._config.annotation.resize_scale_factor
                 )
-            except:
+            except ImageProcessingError:
                 self._annotated_frame = self._img_work.copy()
 
     def _scale_detections(self, detections: sv.Detections, scale_x: float, scale_y: float) -> sv.Detections:

@@ -1,7 +1,6 @@
 import numpy as np
-import torch
 import supervision as sv
-from typing import Optional, Any, List, Dict
+from typing import Any
 
 # --- Kompatibilitätsimport für ByteTrack ---
 try:

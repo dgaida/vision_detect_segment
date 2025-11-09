@@ -75,7 +75,7 @@ class VisionConfig:
     
     def add_object_label(self, label: str):
         """Add a new object label."""
-        if label.lower() not in [l.lower() for l in self._object_labels]:
+        if label.lower() not in [lbl.lower() for lbl in self._object_labels]:
             self._object_labels.append(label.lower())
     
     def set_object_labels(self, labels: List[str]):
