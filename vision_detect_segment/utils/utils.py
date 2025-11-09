@@ -142,10 +142,13 @@ def resize_image(image: np.ndarray, scale_factor: float = 2.0,
         actual_scale_y = new_height / height
         
         return resized, actual_scale_x, actual_scale_y
-        
+
     except Exception as e:
-        raise ImageProcessingError("resize",
-                                   {"original_shape": image.shape, "scale_factor": scale_factor}, e)
+        image_info = {
+            "original_shape": image.shape if image is not None else None,
+            "scale_factor": scale_factor
+        }
+        raise ImageProcessingError("resize", image_info, e)
 
 
 def create_test_image(shapes: Optional[List[str]] = None, 
