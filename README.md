@@ -2,6 +2,15 @@
 
 A flexible Python package for real-time object detection and segmentation with Redis-based streaming support. Designed for robotics applications, this package provides an easy-to-use interface for detecting and segmenting objects in images using state-of-the-art vision models.
 
+## Badges
+
+![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code Quality](https://github.com/dgaida/vision_detect_segment/actions/workflows/lint.yml/badge.svg)](https://github.com/dgaida/vision_detect_segment/actions/workflows/lint.yml)
+[![CodeQL](https://github.com/dgaida/vision_detect_segment/actions/workflows/codeql.yml/badge.svg)](https://github.com/dgaida/vision_detect_segment/actions/workflows/codeql.yml)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 ## Features
 
 - **Multiple Detection Backends**: Support for OWL-V2, YOLO-World, and Grounding-DINO
@@ -87,7 +96,7 @@ cortex = VisualCortex("owlv2", device="auto", config=config)
 image = cv2.imread("example.jpg")
 
 # Detect objects
-from redis_robot_comm import RedisImageStreamer
+from vision_detect_segment import RedisImageStreamer
 streamer = RedisImageStreamer(stream_name="robot_camera")
 streamer.publish_image(image, metadata={"source": "camera1"})
 
