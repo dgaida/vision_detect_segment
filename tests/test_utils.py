@@ -262,8 +262,9 @@ class TestTimer:
         timer = Timer("test")
         with timer:
             time.sleep(0.05)
-        
-        assert 0.04 <= timer.elapsed() <= 0.1
+
+        # increased from 0.1 to 0.25 because on macos in github it takes sometimes upto 0.21 seconds
+        assert 0.04 <= timer.elapsed() <= 0.25
 
 
 class TestFormatDetectionResults:

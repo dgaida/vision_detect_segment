@@ -59,6 +59,11 @@ def publish_test_image(stream_name: str = "robot_camera", use_test_config: bool 
         logger.info("Image published successfully")
         return True
 
+    except RedisConnectionError as e:
+        logger.error(f"Redis connection error: {e}")
+        if hasattr(e, 'details') and e.details:
+            logger.error(f"Error details: {e.details}")
+        return False
     except Exception as e:
         logger.error(f"Failed to publish test image: {e}")
         return False
@@ -153,6 +158,15 @@ def test_manual_processing_with_config():
             logger.error("Failed to get image from Redis for manual processing")
             return None
 
+    except DetectionError as e:
+        logger.error(f"Detection error occurred: {e}")
+        if hasattr(e, 'details') and e.details:
+            logger.error(f"Error details: {e.details}")
+            if 'image_shape' in e.details:
+                logger.error(f"Image shape: {e.details['image_shape']}")
+            if 'model_name' in e.details:
+                logger.error(f"Model name: {e.details['model_name']}")
+        return None
     except VisionDetectionError as e:
         logger.error(f"Vision detection error: {e}")
         if hasattr(e, 'details') and e.details:

@@ -277,7 +277,7 @@ class ObjectDetector:
                 tracked_detections = self._tracker.update_with_detections(detections)
 
                 # Replace the boxes with tracked ones for visualization/publishing
-                tracked_boxes = tracked_detections.xyxy
+                # tracked_boxes = tracked_detections.xyxy
                 track_ids = tracked_detections.tracker_id
 
                 # Attach IDs to your object dicts

@@ -74,8 +74,6 @@ The vision detection system follows a producer-consumer architecture with Redis 
 
 ---
 
-![Workflow](workflow_simple.png)
-
 ![Workflow Detailed](workflow_detailed.png)
 
 ---
