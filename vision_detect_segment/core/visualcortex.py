@@ -5,12 +5,15 @@ import supervision as sv
 
 from .object_detector import ObjectDetector
 from ..utils.config import VisionConfig, get_default_config
-from ..utils.exceptions import (
-    ImageProcessingError, DetectionError, handle_redis_error, handle_detection_error
-)
+from ..utils.exceptions import ImageProcessingError, DetectionError, handle_redis_error, handle_detection_error
 from ..utils.utils import (
-    setup_logging, get_optimal_device, Timer, validate_image,
-    resize_image, format_detection_results, clear_gpu_cache
+    setup_logging,
+    get_optimal_device,
+    Timer,
+    validate_image,
+    resize_image,
+    format_detection_results,
+    clear_gpu_cache,
 )
 
 from redis_robot_comm import RedisImageStreamer
@@ -19,14 +22,19 @@ from redis_robot_comm import RedisImageStreamer
 class VisualCortex:
     """
     A class for handling object detection and segmentation in a robot's workspace.
-    
-    This class integrates object detection models and provides functionality for 
+
+    This class integrates object detection models and provides functionality for
     annotating images, detecting objects, and managing the visual processing pipeline.
     """
 
-    def __init__(self, objdetect_model_id: str, device: str = "auto", 
-                 stream_name: str = 'robot_camera', verbose: bool = False,
-                 config: Optional[VisionConfig] = None):
+    def __init__(
+        self,
+        objdetect_model_id: str,
+        device: str = "auto",
+        stream_name: str = "robot_camera",
+        verbose: bool = False,
+        config: Optional[VisionConfig] = None,
+    ):
         """
         Initialize the VisualCortex.
 
@@ -50,29 +58,29 @@ class VisualCortex:
         self._halo_annotator = None
         self._object_detector = None
         self._streamer = None
-        
+
         # Public configuration
         self.verbose = verbose
         self._config = config or get_default_config(objdetect_model_id)
-        
+
         # Setup logging
         self._logger = setup_logging(verbose)
-        
+
         try:
             if verbose:
-                self._logger.info(f'Using device: {self._device}')
-                self._logger.info(f'PyTorch version: {torch.__version__}')
-                self._logger.info(f'CUDA available: {torch.cuda.is_available()}')
+                self._logger.info(f"Using device: {self._device}")
+                self._logger.info(f"PyTorch version: {torch.__version__}")
+                self._logger.info(f"CUDA available: {torch.cuda.is_available()}")
 
             # Initialize components
             with Timer("Initializing VisualCortex", self._logger if verbose else None):
                 self._initialize_redis_streamer()
                 self._setup_annotators()
                 self._initialize_object_detector()
-                
+
             if verbose:
                 self._logger.info("VisualCortex initialization completed successfully")
-                
+
         except Exception as e:
             error_msg = f"VisualCortex initialization failed: {e}"
             self._logger.error(error_msg)
@@ -83,8 +91,7 @@ class VisualCortex:
         try:
             self._streamer = RedisImageStreamer(stream_name=self._stream_name)
         except Exception as e:
-            redis_error = handle_redis_error("initialization", self._config.redis.host,
-                                             self._config.redis.port, e)
+            redis_error = handle_redis_error("initialization", self._config.redis.host, self._config.redis.port, e)
             if self.verbose:
                 self._logger.warning(f"Redis streamer initialization failed: {redis_error}")
             self._streamer = None
@@ -93,17 +100,15 @@ class VisualCortex:
         """Initialize supervision library annotators."""
         try:
             annotation_config = self._config.annotation
-            
+
             self._label_annotator = sv.LabelAnnotator(
                 text_position=sv.Position.BOTTOM_CENTER,
                 text_scale=annotation_config.text_scale,
-                text_padding=annotation_config.text_padding
+                text_padding=annotation_config.text_padding,
             )
-            self._corner_annotator = sv.BoxCornerAnnotator(
-                thickness=annotation_config.box_thickness
-            )
+            self._corner_annotator = sv.BoxCornerAnnotator(thickness=annotation_config.box_thickness)
             self._halo_annotator = sv.HaloAnnotator()
-            
+
         except Exception as e:
             self._logger.warning(f"Annotation setup failed: {e}")
             # Create minimal annotators as fallback
@@ -114,13 +119,13 @@ class VisualCortex:
     def _initialize_object_detector(self):
         """Initialize the object detection model."""
         object_labels = self._config.get_object_labels()
-        
+
         self._object_detector = ObjectDetector(
             device=self._device,
             model_id=self._objdetect_model_id,
             object_labels=object_labels,
             verbose=self.verbose,
-            config=self._config
+            config=self._config,
         )
 
     def detect_objects_from_redis(self) -> bool:
@@ -134,7 +139,7 @@ class VisualCortex:
             if self.verbose:
                 self._logger.error("Redis streamer not available")
             return False
-            
+
         try:
             result = self._streamer.get_latest_image()
             if not result:
@@ -143,13 +148,13 @@ class VisualCortex:
                 return False
 
             image, metadata = result
-            
+
             # Validate image before processing (done again in process_image_callback)
             # validate_image(image)
-            
+
             self.process_image_callback(image, metadata, None)
             return True
-            
+
         except ImageProcessingError as e:
             if self.verbose:
                 self._logger.error(f"Image processing error: {e}")
@@ -159,25 +164,24 @@ class VisualCortex:
                 self._logger.error(f"Error in manual detection: {e}")
             return False
 
-    def process_image_callback(self, image: np.ndarray, metadata: Dict[str, Any],
-                               image_info: Optional[Dict[str, Any]] = None):
+    def process_image_callback(self, image: np.ndarray, metadata: Dict[str, Any], image_info: Optional[Dict[str, Any]] = None):
         """
         Process incoming images from Redis stream.
-        
+
         Args:
             image: Input image
             metadata: Image metadata from Redis
             image_info: Optional image dimension info
         """
-        workspace_id = metadata.get('workspace_id', 'unknown')
-        frame_id = metadata.get('frame_id', self._processed_frames)
+        workspace_id = metadata.get("workspace_id", "unknown")
+        frame_id = metadata.get("frame_id", self._processed_frames)
 
         try:
             # Validate input image
             validate_image(image)
-            
+
             if self.verbose and image_info:
-                width, height = image_info['width'], image_info['height']
+                width, height = image_info["width"], image_info["height"]
                 self._logger.info(f"Processing frame {frame_id}: {width}x{height} from {workspace_id}")
 
             # Store current image
@@ -186,7 +190,7 @@ class VisualCortex:
             # Run detection with timing
             with Timer("Object detection", self._logger if self.verbose else None):
                 detected_objects = self._run_detection()
-            
+
             # Create annotated frame with timing
             with Timer("Annotation", self._logger if self.verbose else None):
                 self._create_annotated_frame(detected_objects)
@@ -203,7 +207,7 @@ class VisualCortex:
                         self._logger.debug(summary)
                 else:
                     self._logger.info("No objects detected")
-                    
+
         except ImageProcessingError as e:
             if self.verbose:
                 self._logger.error(f"Image processing failed: {e}")
@@ -223,28 +227,25 @@ class VisualCortex:
     def get_current_image(self, resize: bool = True) -> Optional[np.ndarray]:
         """
         Get current raw image.
-        
+
         Args:
             resize: Whether to resize small images
-            
+
         Returns:
             Current image or None if no image available
         """
         if self._img_work is None:
             return None
-            
+
         if resize and self._img_work.shape[0] < 640:
             try:
-                resized, _, _ = resize_image(
-                    self._img_work, 
-                    scale_factor=self._config.annotation.resize_scale_factor
-                )
+                resized, _, _ = resize_image(self._img_work, scale_factor=self._config.annotation.resize_scale_factor)
                 return resized
             except ImageProcessingError as e:
                 if self.verbose:
                     self._logger.warning(f"Image resize failed: {e}")
                 return self._img_work
-        
+
         return self._img_work
 
     def get_annotated_image(self) -> Optional[np.ndarray]:
@@ -274,7 +275,7 @@ class VisualCortex:
         """Run object detection on current image."""
         if self._img_work is None or self._object_detector is None:
             return []
-            
+
         try:
             return self._object_detector.detect_objects(self._img_work)
         except Exception as e:
@@ -292,8 +293,7 @@ class VisualCortex:
             if not detected_objects or self._object_detector is None:
                 # No detections, just resize the image
                 self._annotated_frame, _, _ = resize_image(
-                    self._img_work.copy(), 
-                    scale_factor=self._config.annotation.resize_scale_factor
+                    self._img_work.copy(), scale_factor=self._config.annotation.resize_scale_factor
                 )
                 return
 
@@ -308,17 +308,14 @@ class VisualCortex:
             # Apply halo annotation if masks are available
             if hasattr(detections, "mask") and detections.mask is not None and len(detections.mask) > 0:
                 try:
-                    annotated_frame = self._halo_annotator.annotate(
-                        scene=annotated_frame, detections=detections
-                    )
+                    annotated_frame = self._halo_annotator.annotate(scene=annotated_frame, detections=detections)
                 except Exception as e:
                     if self.verbose:
                         self._logger.warning(f"Halo annotation failed: {e}")
 
             # Resize for display
             resized_frame, scale_x, scale_y = resize_image(
-                annotated_frame, 
-                scale_factor=self._config.annotation.resize_scale_factor
+                annotated_frame, scale_factor=self._config.annotation.resize_scale_factor
             )
 
             # Scale detection coordinates for display
@@ -327,9 +324,7 @@ class VisualCortex:
             # Add bounding boxes
             if self._config.annotation.show_labels:
                 try:
-                    resized_frame = self._corner_annotator.annotate(
-                        scene=resized_frame, detections=scaled_detections
-                    )
+                    resized_frame = self._corner_annotator.annotate(scene=resized_frame, detections=scaled_detections)
                 except Exception as e:
                     if self.verbose:
                         self._logger.warning(f"Corner annotation failed: {e}")
@@ -340,24 +335,21 @@ class VisualCortex:
                     labels = self._object_detector.get_label_texts()
                     if labels is not None:
                         resized_frame = self._label_annotator.annotate(
-                            scene=resized_frame,
-                            detections=scaled_detections,
-                            labels=labels
+                            scene=resized_frame, detections=scaled_detections, labels=labels
                         )
                 except Exception as e:
                     if self.verbose:
                         self._logger.warning(f"Label annotation failed: {e}")
 
             self._annotated_frame = resized_frame
-            
+
         except Exception as e:
             if self.verbose:
                 self._logger.error(f"Annotation creation failed: {e}")
             # Fallback to original image
             try:
                 self._annotated_frame, _, _ = resize_image(
-                    self._img_work.copy(),
-                    scale_factor=self._config.annotation.resize_scale_factor
+                    self._img_work.copy(), scale_factor=self._config.annotation.resize_scale_factor
                 )
             except ImageProcessingError:
                 self._annotated_frame = self._img_work.copy()
@@ -369,11 +361,7 @@ class VisualCortex:
             scaled_xyxy[:, [0, 2]] *= scale_x  # Scale x-coordinates
             scaled_xyxy[:, [1, 3]] *= scale_y  # Scale y-coordinates
 
-            return sv.Detections(
-                xyxy=scaled_xyxy,
-                confidence=detections.confidence,
-                class_id=detections.class_id
-            )
+            return sv.Detections(xyxy=scaled_xyxy, confidence=detections.confidence, class_id=detections.class_id)
         except Exception as e:
             if self.verbose:
                 self._logger.warning(f"Detection scaling failed: {e}")
@@ -390,6 +378,7 @@ class VisualCortex:
         """Get current memory usage information."""
         try:
             from .utils import get_memory_usage
+
             return get_memory_usage()
         except Exception as e:
             if self.verbose:
@@ -405,7 +394,7 @@ class VisualCortex:
             "has_current_image": self._img_work is not None,
             "current_detections_count": len(self._detected_objects),
             "redis_available": self._streamer is not None,
-            "detector_available": self._object_detector is not None
+            "detector_available": self._object_detector is not None,
         }
 
     # Property compatibility methods (for backward compatibility)
@@ -419,7 +408,7 @@ class VisualCortex:
         """Get current annotated image."""
         return self.get_annotated_image()
 
-    @property 
+    @property
     def detected_objects(self) -> List[Dict]:
         """Get list of detected objects."""
         return self.get_detected_objects()
@@ -440,5 +429,5 @@ class VisualCortex:
         return self.get_current_image(resize)
 
     def annotated_frame(self) -> Optional[np.ndarray]:
-        """Deprecated: use get_annotated_image() instead.""" 
+        """Deprecated: use get_annotated_image() instead."""
         return self.get_annotated_image()

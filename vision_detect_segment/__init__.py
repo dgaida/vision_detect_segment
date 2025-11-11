@@ -10,13 +10,7 @@ try:
     from .core.object_tracker import ObjectTracker
     from .utils.config import VisionConfig
 
-    __all__ = [
-        "VisualCortex",
-        "ObjectDetector",
-        "ObjectSegmenter",
-        "ObjectTracker",
-        "VisionConfig"
-    ]
+    __all__ = ["VisualCortex", "ObjectDetector", "ObjectSegmenter", "ObjectTracker", "VisionConfig"]
 except ImportError as e:
     # Graceful degradation if dependencies are missing
     import warnings

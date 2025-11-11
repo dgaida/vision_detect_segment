@@ -333,7 +333,7 @@ for obj, box in zip(detected_objects, boxes):
         box,
         image
     )
-    
+
     if mask_8u is not None:
         # Serialize mask for Redis
         obj["mask_data"] = base64.b64encode(mask_8u.tobytes()).decode('utf-8')
@@ -602,14 +602,14 @@ if success:
     # 5. Get results
     detected_objects = cortex.get_detected_objects()
     annotated_image = cortex.get_annotated_image()
-    
+
     # 6. Display
     print(f"Found {len(detected_objects)} objects:")
     for obj in detected_objects:
         print(f"  - {obj['label']}: {obj['confidence']:.2f}")
         if 'track_id' in obj:
             print(f"    Track ID: {obj['track_id']}")
-    
+
     cv2.imshow("Detections", annotated_image)
     cv2.waitKey(0)
 ```
@@ -637,23 +637,23 @@ try:
         ret, frame = cap.read()
         if not ret:
             break
-        
+
         # Publish to Redis
         streamer.publish_image(
             frame,
             metadata={"frame": cap.get(cv2.CAP_PROP_POS_FRAMES)}
         )
-        
+
         # Detect objects
         if cortex.detect_objects_from_redis():
             # Show results
             annotated = cortex.get_annotated_image()
             cv2.imshow("Detections", annotated)
-        
+
         # Break on 'q'
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-        
+
         time.sleep(0.033)  # ~30 FPS
 
 finally:
@@ -681,13 +681,13 @@ while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
         break
-    
+
     frame_count += 1
-    
+
     # Publish every 10th frame
     if frame_count % 10 == 0:
         streamer.publish_image(frame)
-        
+
         if cortex.detect_objects_from_redis():
             objects = cortex.get_detected_objects()
             print(f"Frame {frame_count}: {len(objects)} objects")

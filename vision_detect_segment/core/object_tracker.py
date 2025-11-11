@@ -41,8 +41,8 @@ class ObjectTracker:
         if self._use_yolo_tracker and hasattr(self.model, "tracker"):
             try:
                 self.model.tracker.reset()
-            except Exception:
-                pass
+            except Exception as e:
+                print(e)
 
     # ----------------------------------------------------------------------
     # 🟢 YOLO tracking
@@ -64,22 +64,10 @@ class ObjectTracker:
         try:
             if self.enable_tracking:
                 # Run Ultralytics tracking — persist ensures track IDs stay consistent
-                results = self.model.track(
-                    image,
-                    persist=True,
-                    stream=False,
-                    verbose=False,
-                    conf=threshold,
-                    max_det=max_det
-                )
+                results = self.model.track(image, persist=True, stream=False, verbose=False, conf=threshold, max_det=max_det)
             else:
                 # Fall back to standard detection if tracking disabled
-                results = self.model.predict(
-                    image,
-                    conf=threshold,
-                    max_det=max_det,
-                    verbose=False
-                )
+                results = self.model.predict(image, conf=threshold, max_det=max_det, verbose=False)
 
             return results
 

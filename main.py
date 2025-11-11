@@ -5,12 +5,13 @@ from pathlib import Path
 from vision_detect_segment.core.visualcortex import VisualCortex
 from vision_detect_segment.utils.config import get_default_config, create_test_config
 from vision_detect_segment.utils.utils import (
-    create_test_image, load_image_safe, format_detection_results,
-    setup_logging, Timer
+    create_test_image,
+    load_image_safe,
+    format_detection_results,
+    setup_logging,
+    Timer,
 )
-from vision_detect_segment.utils.exceptions import (
-    VisionDetectionError, RedisConnectionError, DetectionError
-)
+from vision_detect_segment.utils.exceptions import VisionDetectionError, RedisConnectionError, DetectionError
 from redis_robot_comm import RedisImageStreamer
 
 
@@ -50,7 +51,7 @@ def publish_test_image(stream_name: str = "robot_camera", use_test_config: bool 
             "workspace_id": "workspace_test",
             "robot_pose": {"x": 0.0, "y": 0.0, "z": 0.5, "roll": 0.0, "pitch": 0.0, "yaw": 0.0},
             "frame_id": 1,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
         with Timer("Publishing image to Redis", logger):
@@ -61,7 +62,7 @@ def publish_test_image(stream_name: str = "robot_camera", use_test_config: bool 
 
     except RedisConnectionError as e:
         logger.error(f"Redis connection error: {e}")
-        if hasattr(e, 'details') and e.details:
+        if hasattr(e, "details") and e.details:
             logger.error(f"Error details: {e.details}")
         return False
     except Exception as e:
@@ -135,12 +136,7 @@ def test_manual_processing_with_config():
 
         # Initialize VisualCortex with configuration
         with Timer("Initializing VisualCortex", logger):
-            visual_cortex = VisualCortex(
-                objdetect_model_id="owlv2",
-                device="auto",
-                verbose=True,
-                config=config
-            )
+            visual_cortex = VisualCortex(objdetect_model_id="owlv2", device="auto", verbose=True, config=config)
 
         # Manually trigger detection
         logger.info("Manually triggering object detection...")
@@ -160,21 +156,22 @@ def test_manual_processing_with_config():
 
     except DetectionError as e:
         logger.error(f"Detection error occurred: {e}")
-        if hasattr(e, 'details') and e.details:
+        if hasattr(e, "details") and e.details:
             logger.error(f"Error details: {e.details}")
-            if 'image_shape' in e.details:
+            if "image_shape" in e.details:
                 logger.error(f"Image shape: {e.details['image_shape']}")
-            if 'model_name' in e.details:
+            if "model_name" in e.details:
                 logger.error(f"Model name: {e.details['model_name']}")
         return None
     except VisionDetectionError as e:
         logger.error(f"Vision detection error: {e}")
-        if hasattr(e, 'details') and e.details:
+        if hasattr(e, "details") and e.details:
             logger.error(f"Error details: {e.details}")
         return None
     except Exception as e:
         logger.error(f"Unexpected error in test_manual_processing_with_config: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -198,12 +195,7 @@ def test_default_config_processing():
         time.sleep(1)
 
         # Initialize VisualCortex with default config
-        visual_cortex = VisualCortex(
-            objdetect_model_id="owlv2",
-            device="auto",
-            verbose=True,
-            config=config
-        )
+        visual_cortex = VisualCortex(objdetect_model_id="owlv2", device="auto", verbose=True, config=config)
 
         # Test detection
         success = visual_cortex.detect_objects_from_redis()
@@ -272,6 +264,7 @@ def test_error_handling():
             try:
                 # This should trigger image validation error
                 from vision_detect_segment.utils import validate_image
+
                 validate_image(invalid_image)
                 logger.error("ERROR: Should have failed with invalid image")
             except Exception as e:
@@ -286,6 +279,7 @@ def test_error_handling():
     except Exception as e:
         logger.error(f"Error handling test failed unexpectedly: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -324,11 +318,12 @@ def main():
         logger.info("\nTest interrupted by user")
     except VisionDetectionError as e:
         logger.error(f"\nVision system error: {e}")
-        if hasattr(e, 'details') and e.details:
+        if hasattr(e, "details") and e.details:
             logger.error(f"Details: {e.details}")
     except Exception as e:
         logger.error(f"\nUnexpected error: {e}")
         import traceback
+
         traceback.print_exc()
 
     logger.info("Test execution finished.")

@@ -106,7 +106,7 @@ success = cortex.detect_objects_from_redis()
 if success:
     detected_objects = cortex.get_detected_objects()
     annotated_image = cortex.get_annotated_image()
-    
+
     # Display results
     cv2.imshow("Detections", annotated_image)
     cv2.waitKey(0)
@@ -367,7 +367,7 @@ vision_detect_segment/
 │       ├── lint.yml
 │       └── release.yml
 ├── examples/
-│   └── example.png              
+│   └── example.png
 ├── tests/
 │   ├── __init__.py
 │   ├── test_config.py

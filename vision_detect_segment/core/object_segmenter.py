@@ -5,16 +5,13 @@ import supervision as sv
 from typing import Optional, Tuple
 
 from ..utils.config import VisionConfig
-from ..utils.exceptions import (
-    SegmentationError, DependencyError, ModelLoadError, handle_model_loading_error
-)
-from ..utils.utils import (
-    setup_logging, get_optimal_device, Timer, validate_image, clear_gpu_cache
-)
+from ..utils.exceptions import SegmentationError, DependencyError, ModelLoadError, handle_model_loading_error
+from ..utils.utils import setup_logging, get_optimal_device, Timer, validate_image, clear_gpu_cache
 
 # Handle optional dependencies gracefully
 try:
     from sam2.sam2_image_predictor import SAM2ImagePredictor
+
     SAM2_AVAILABLE = True
 except (ModuleNotFoundError, ImportError) as e:
     print("SAM2 module not installed or cannot be found!", e)
@@ -23,6 +20,7 @@ except (ModuleNotFoundError, ImportError) as e:
 
 try:
     from ultralytics import FastSAM
+
     FASTSAM_AVAILABLE = True
 except (ModuleNotFoundError, ImportError) as e:
     print("FastSAM module not installed or cannot be found!", e)
@@ -38,8 +36,13 @@ class ObjectSegmenter:
     tools to generate and attach segmentation masks to detected objects.
     """
 
-    def __init__(self, segmentation_model: Optional[str] = "facebook/sam2.1-hiera-tiny", 
-                 device: str = "cuda", verbose: bool = False, config: Optional[VisionConfig] = None):
+    def __init__(
+        self,
+        segmentation_model: Optional[str] = "facebook/sam2.1-hiera-tiny",
+        device: str = "cuda",
+        verbose: bool = False,
+        config: Optional[VisionConfig] = None,
+    ):
         """
         Initialize the ObjectSegmenter.
 
@@ -54,20 +57,20 @@ class ObjectSegmenter:
         self._segmentation_model = segmentation_model
         self._model_id = None
         self._segmenter = None
-        
+
         # Public configuration
         self.verbose = verbose
         self._config = config or VisionConfig()
-        
+
         # Setup logging
         self._logger = setup_logging(verbose)
-        
+
         try:
             self._initialize_segmenter(segmentation_model)
-            
+
             if verbose:
                 self._logger.info(f"ObjectSegmenter initialized with {self._model_id} on {self._device}")
-                
+
         except Exception as e:
             model_error = handle_model_loading_error(f"segmentation_{self._model_id}", e)
             self._logger.error(str(model_error))
@@ -92,14 +95,14 @@ class ObjectSegmenter:
                 available_models.append("SAM2")
             if FASTSAM_AVAILABLE:
                 available_models.append("FastSAM")
-            
+
             if not available_models:
                 raise DependencyError(
-                    "sam2 or ultralytics", 
+                    "sam2 or ultralytics",
                     "segmentation",
-                    "Install with: pip install segment-anything-2 or pip install ultralytics"
+                    "Install with: pip install segment-anything-2 or pip install ultralytics",
                 )
-            
+
             # Fallback to FastSAM if available
             if FASTSAM_AVAILABLE:
                 self._model_id = "fastsam"
@@ -137,14 +140,14 @@ class ObjectSegmenter:
                     box_tensor = torch.from_numpy(box)
                 else:
                     box_tensor = box
-                    
+
                 mask_8u, mask = self.segment_box_in_image(box_tensor, image)
                 if mask is not None:
                     masks.append(mask)
                 else:
                     if self.verbose:
                         self._logger.warning(f"No mask generated for detection {i}")
-                        
+
             except Exception as e:
                 if self.verbose:
                     self._logger.warning(f"Segmentation failed for detection {i}: {e}")
@@ -154,11 +157,12 @@ class ObjectSegmenter:
         valid_masks = [m for m in masks if m is not None]
         if valid_masks:
             detections.mask = valid_masks
-            
+
         return detections
 
-    def segment_box_in_image(self, box: torch.Tensor,
-                             img_work: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def segment_box_in_image(
+        self, box: torch.Tensor, img_work: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """
         Segments a detected object's bounding box in the image.
 
@@ -178,7 +182,7 @@ class ObjectSegmenter:
         """
         if self._segmenter is None:
             raise SegmentationError("Segmentation model not available")
-            
+
         try:
             validate_image(img_work)
         except Exception as e:
@@ -190,11 +194,13 @@ class ObjectSegmenter:
             else:  # SAM2
                 return self._segment_box_with_sam2(box, img_work)
         except Exception as e:
-            raise SegmentationError(f"Segmentation failed: {e}", bbox=box.detach().cpu().numpy().tolist(),
-                                    segmentation_model=self._model_id)
+            raise SegmentationError(
+                f"Segmentation failed: {e}", bbox=box.detach().cpu().numpy().tolist(), segmentation_model=self._model_id
+            )
 
-    def _segment_box_with_fastsam(self, box: torch.Tensor,
-                                  img_work: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def _segment_box_with_fastsam(
+        self, box: torch.Tensor, img_work: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Segment using FastSAM model."""
         input_box = box.detach().cpu().numpy()
         x_min, y_min, x_max, y_max = map(int, input_box)
@@ -206,14 +212,14 @@ class ObjectSegmenter:
         try:
             # Run FastSAM inference
             everything_results = self._segmenter(
-                img_work, 
-                device=self._device, 
+                img_work,
+                device=self._device,
                 retina_masks=True,
-                imgsz=imgsz, 
-                conf=0.4, 
-                iou=0.9, 
-                bboxes=input_box, 
-                verbose=False
+                imgsz=imgsz,
+                conf=0.4,
+                iou=0.9,
+                bboxes=input_box,
+                verbose=False,
             )
 
             masks = everything_results[0].masks
@@ -226,11 +232,11 @@ class ObjectSegmenter:
                     if self.verbose:
                         self._logger.warning(f"Empty mask generated for bbox {input_box}")
                     return None, None
-                    
+
                 return mask_8u, mask_binary
             else:
                 return None, None
-                
+
         except Exception as e:
             if self.verbose:
                 self._logger.error(f"FastSAM segmentation failed: {e}")
@@ -240,8 +246,9 @@ class ObjectSegmenter:
             if self._device == "cuda":
                 clear_gpu_cache()
 
-    def _segment_box_with_sam2(self, box: torch.Tensor,
-                               img_work: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def _segment_box_with_sam2(
+        self, box: torch.Tensor, img_work: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Segment using SAM2 model."""
         try:
             with torch.inference_mode():
@@ -255,32 +262,30 @@ class ObjectSegmenter:
             if self._device == "cuda":
                 clear_gpu_cache()
 
-    def _run_sam2_inference(self, box: torch.Tensor,
-                            img_work: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def _run_sam2_inference(
+        self, box: torch.Tensor, img_work: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Run SAM2 model inference."""
         self._segmenter.set_image(img_work)
         input_box = box.detach().cpu().numpy()
 
         try:
             masks, scores, _ = self._segmenter.predict(
-                point_coords=None, 
-                point_labels=None,
-                box=input_box[None, :], 
-                multimask_output=True
+                point_coords=None, point_labels=None, box=input_box[None, :], multimask_output=True
             )
-            
+
             # Choose mask with the highest score
             index = np.argmax(scores)
             mask = masks[index]
             mask_normalized = cv2.normalize(mask, None, 0, 255, cv2.NORM_MINMAX)
             mask_8u = mask_normalized.astype(np.uint8)
-            
+
             if mask_8u is not None:
                 mask_binary = mask_8u > 0
                 return mask_8u, mask_binary
             else:
                 return None, None
-                
+
         except Exception as e:
             if self.verbose:
                 self._logger.error(f"SAM2 inference failed: {e}")
@@ -353,12 +358,12 @@ class ObjectSegmenter:
                                 xyxy=detections.xyxy,
                                 confidence=detections.confidence,
                                 class_id=detections.class_id,
-                                mask=masks_array
+                                mask=masks_array,
                             )
             except Exception as e:
                 # If mask processing fails, return original detections
                 print(f"Warning: Could not process masks: {e}")
-                
+
         return detections
 
     # Backward compatibility methods (deprecated)

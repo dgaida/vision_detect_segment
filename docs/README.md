@@ -72,7 +72,7 @@ streamer.publish_image(image, metadata={"robot": "arm1"})
 if cortex.detect_objects_from_redis():
     objects = cortex.get_detected_objects()
     annotated = cortex.get_annotated_image()
-    
+
     # Display results
     print(f"Found {len(objects)} objects")
     cv2.imshow("Detections", annotated)
@@ -90,11 +90,11 @@ if cortex.detect_objects_from_redis():
 
 This architecture provides several advantages:
 
-✅ **Decoupling** - Image producers and consumers operate independently  
-✅ **Asynchronous** - Non-blocking processing enables real-time operation  
-✅ **Scalability** - Multiple detectors can consume from the same stream  
-✅ **Flexibility** - Easy to swap detection models or add processing steps  
-✅ **Robustness** - Redis provides reliable message delivery and persistence  
+✅ **Decoupling** - Image producers and consumers operate independently
+✅ **Asynchronous** - Non-blocking processing enables real-time operation
+✅ **Scalability** - Multiple detectors can consume from the same stream
+✅ **Flexibility** - Easy to swap detection models or add processing steps
+✅ **Robustness** - Redis provides reliable message delivery and persistence
 ✅ **Monitoring** - All data flows through Redis for easy debugging and logging
 
 ## Performance
