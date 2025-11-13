@@ -51,7 +51,3 @@ extend-exclude = '''
   | __pycache__
 )/
 '''
-
-[tool.ruff]
-line-length = 127
-target-version = "py38"

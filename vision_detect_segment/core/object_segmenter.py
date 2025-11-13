@@ -27,10 +27,20 @@ except (ModuleNotFoundError, ImportError) as e:
     FastSAM = None
     FASTSAM_AVAILABLE = False
 
+# EdgeTAM wrapper (assuming you added it under vision_detect_segment/segment/edgetam_segment.py)
+try:
+    from ..segment.edgetam_segment import EdgeTAMSegmenter
+
+    EDGETAM_AVAILABLE = True
+except (ModuleNotFoundError, ImportError) as e:
+    print("EdgeTAM not installed or cannot be found!", e)
+    EdgeTAMSegmenter = None
+    EDGETAM_AVAILABLE = False
+
 
 class ObjectSegmenter:
     """
-    A class for handling image segmentation tasks using a segmentation model like SAM2 or FastSAM.
+    A class for handling image segmentation tasks using a segmentation model like SAM2, FastSAM or EdgeTAM.
 
     This class enables object segmentation in an image based on detections and provides
     tools to generate and attach segmentation masks to detected objects.
@@ -42,6 +52,8 @@ class ObjectSegmenter:
         device: str = "cuda",
         verbose: bool = False,
         config: Optional[VisionConfig] = None,
+        edgetam_config_path: Optional[str] = None,
+        edgetam_weights_path: Optional[str] = None,
     ):
         """
         Initialize the ObjectSegmenter.
@@ -51,6 +63,8 @@ class ObjectSegmenter:
             device: Device to run the segmentation model on. Can be 'cuda' or 'cpu'.
             verbose: Enable verbose logging
             config: Optional VisionConfig instance
+            edgetam_config_path: If using EdgeTAM, path to its config yaml
+            edgetam_weights_path: If using EdgeTAM, path to its weights
         """
         # Private attributes
         self._device = get_optimal_device(prefer_gpu=(device != "cpu"))
@@ -66,7 +80,11 @@ class ObjectSegmenter:
         self._logger = setup_logging(verbose)
 
         try:
-            self._initialize_segmenter(segmentation_model)
+            self._initialize_segmenter(
+                segmentation_model,
+                edgetam_config_path=edgetam_config_path,
+                edgetam_weights_path=edgetam_weights_path,
+            )
 
             if verbose:
                 self._logger.info(f"ObjectSegmenter initialized with {self._model_id} on {self._device}")
@@ -79,9 +97,20 @@ class ObjectSegmenter:
             if verbose:
                 self._logger.warning("Segmentation will be disabled")
 
-    def _initialize_segmenter(self, segmentation_model: Optional[str]):
+    def _initialize_segmenter(self, segmentation_model: Optional[str], edgetam_config_path=None, edgetam_weights_path=None):
         """Initialize the segmentation model."""
-        if SAM2_AVAILABLE and segmentation_model and "sam2" in segmentation_model.lower():
+        if segmentation_model and isinstance(segmentation_model, str) and "edgetam" in segmentation_model.lower():
+            if EDGETAM_AVAILABLE:
+                self._model_id = "edgetam"
+                with Timer("Loading EdgeTAM model", self._logger if self.verbose else None):
+                    self._segmenter = EdgeTAMSegmenter(
+                        config_path=edgetam_config_path,
+                        weights_path=edgetam_weights_path,
+                        device=self._device,
+                    )
+            else:
+                raise DependencyError("EdgeTAM required but not available.")
+        elif SAM2_AVAILABLE and segmentation_model and "sam2" in segmentation_model.lower():
             self._model_id = "sam2.1-hiera-tiny"
             with Timer("Loading SAM2 model", self._logger if self.verbose else None):
                 self._segmenter = SAM2ImagePredictor.from_pretrained(segmentation_model)
@@ -95,6 +124,8 @@ class ObjectSegmenter:
                 available_models.append("SAM2")
             if FASTSAM_AVAILABLE:
                 available_models.append("FastSAM")
+            if EDGETAM_AVAILABLE:
+                available_models.append("EdgeTAM")
 
             if not available_models:
                 raise DependencyError(
