@@ -33,6 +33,14 @@ except (ModuleNotFoundError, ImportError) as e:
     YOLO_AVAILABLE = False
 
 try:
+    from ultralytics import YOLOE
+
+    YOLOE_AVAILABLE = True
+except (ModuleNotFoundError, ImportError) as e:
+    print(f"YOLOE not available: {e}")
+    YOLOE_AVAILABLE = False
+
+try:
     from transformers import Owlv2Processor, Owlv2ForObjectDetection, AutoProcessor, AutoModelForZeroShotObjectDetection
 
     TRANSFORMERS_AVAILABLE = True
@@ -136,7 +144,13 @@ class ObjectDetector:
 
     def _validate_model_availability(self):
         """Check if required dependencies are available for the selected model."""
-        if self._model_id == "yolo-world" and not YOLO_AVAILABLE:
+        if "yoloe" in self._model_id.lower() and not YOLOE_AVAILABLE:
+            raise DependencyError(
+                "ultralytics (with YOLOE support)",
+                f"model {self._model_id}",
+                "Install with: pip install -U ultralytics>=8.3.0",
+            )
+        elif self._model_id == "yolo-world" and not YOLO_AVAILABLE:
             raise DependencyError("ultralytics", f"model {self._model_id}", "Install with: pip install ultralytics")
         elif self._model_id in ["owlv2", "grounding_dino"] and not TRANSFORMERS_AVAILABLE:
             raise DependencyError("transformers", f"model {self._model_id}", "Install with: pip install transformers")
@@ -172,7 +186,9 @@ class ObjectDetector:
 
         try:
             with Timer("Object detection", self._logger if self.verbose else None):
-                if self._model_id == "yolo-world":
+                if "yoloe" in self._model_id.lower():
+                    return self._detect_yoloe(image, threshold)
+                elif self._model_id == "yolo-world":
                     return self._detect_yolo(image, threshold)
                 else:
                     return self._detect_transformer_based(image, threshold)
@@ -222,6 +238,66 @@ class ObjectDetector:
 
         # Publish to Redis
         self._publish_detections(detected_objects, "yolo-world")
+
+        return detected_objects
+
+    def _detect_yoloe(self, image: np.ndarray, threshold: float) -> List[Dict]:
+        """Run YOLOE detection and segmentation."""
+        # Run detection/tracking
+        if self._tracker and self._tracker._use_yolo_tracker:
+            results = self._tracker.track(image, threshold)
+        else:
+            results = self._model.predict(image, conf=threshold, max_det=20, verbose=False)
+
+        detected_objects = []
+        boxes = results[0].boxes
+
+        if boxes is None:
+            return detected_objects
+
+        # Extract detections
+        for i, box in enumerate(boxes):
+            cls = int(boxes.cls[i])
+            class_name = results[0].names[cls]
+            confidence = float(boxes.conf[i])
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+            obj_dict = {
+                "label": class_name,
+                "confidence": confidence,
+                "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
+                "has_mask": False,
+            }
+
+            # Add track ID if available
+            if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
+                obj_dict["track_id"] = int(results[0].boxes.id[i])
+
+            detected_objects.append(obj_dict)
+
+        # Extract segmentation masks (built-in with YOLOE)
+        if hasattr(results[0], "masks") and results[0].masks is not None:
+            masks_data = results[0].masks.data
+
+            for i, obj in enumerate(detected_objects):
+                if i < len(masks_data):
+                    mask = masks_data[i].cpu().numpy()
+                    mask_8u = (mask * 255).astype(np.uint8)
+
+                    obj["mask_data"] = self._serialize_mask(mask_8u)
+                    obj["has_mask"] = True
+                    obj["mask_shape"] = list(mask_8u.shape)
+                    obj["mask_dtype"] = str(mask_8u.dtype)
+
+        # Create supervision detections
+        track_ids = None
+        if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
+            track_ids = results[0].boxes.id.cpu().numpy().astype(int)
+
+        self._create_supervision_detections(results, detected_objects, track_ids)
+
+        # Publish to Redis
+        self._publish_detections(detected_objects, self._model_id)
 
         return detected_objects
 
@@ -430,7 +506,9 @@ class ObjectDetector:
 
     def _load_model(self, model_id: str) -> Tuple[any, any]:
         """Load the specified model and processor."""
-        if model_id == "yolo-world":
+        if "yoloe" in model_id.lower():
+            return self._load_yoloe_model()
+        elif model_id == "yolo-world":
             return self._load_yolo_model()
         elif model_id == "owlv2":
             return self._load_owlv2_model()
@@ -445,6 +523,20 @@ class ObjectDetector:
         model_path = model_config.model_params["model_path"]
         model = YOLO(model_path)
         model.set_classes(self._object_labels[0])
+        return model, None
+
+    def _load_yoloe_model(self):
+        """Load YOLOE model."""
+        model_config = MODEL_CONFIGS[self._model_id]
+        model_path = model_config.model_params["model_path"]
+
+        model = YOLOE(model_path)
+
+        # Set classes for prompted models
+        is_prompt_free = model_config.model_params.get("is_prompt_free", False)
+        if not is_prompt_free and model_config.model_params.get("supports_prompts", True):
+            model.set_classes(self._object_labels[0], model.get_text_pe(self._object_labels[0]))
+
         return model, None
 
     def _load_owlv2_model(self):
@@ -467,6 +559,11 @@ class ObjectDetector:
     def add_label(self, label: str):
         """Add a new detectable object label."""
         self._object_labels[0].append(label.lower())
+
+        if "yoloe" in self._model_id.lower():
+            model_config = MODEL_CONFIGS.get(self._model_id)
+            if model_config and not model_config.model_params.get("is_prompt_free", False):
+                self._model.set_classes(self._object_labels[0], self._model.get_text_pe(self._object_labels[0]))
         if self._model_id == "grounding_dino":
             self._processed_labels = ObjectDetector._preprocess_labels(self._object_labels, self._model_id)
         elif self._model_id == "yolo-world":

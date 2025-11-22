@@ -163,6 +163,107 @@ MODEL_CONFIGS = {
             "text_preprocessing": {"lowercase": True, "join_with_periods": True},
         },
     ),
+    # NEW: YOLOE configurations
+    "yoloe-11s": ModelConfig(
+        name="yoloe-11s",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11s-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,  # YOLOE has integrated segmentation
+            "supports_prompts": True,  # Supports text and visual prompts
+            "prompt_free_variant": "yoloe-11s-seg-pf.pt",  # Prompt-free version
+        },
+    ),
+    "yoloe-11m": ModelConfig(
+        name="yoloe-11m",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11m-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": True,
+            "prompt_free_variant": "yoloe-11m-seg-pf.pt",
+        },
+    ),
+    "yoloe-11l": ModelConfig(
+        name="yoloe-11l",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11l-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": True,
+            "prompt_free_variant": "yoloe-11l-seg-pf.pt",
+        },
+    ),
+    "yoloe-v8s": ModelConfig(
+        name="yoloe-v8s",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-v8s-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": True,
+            "prompt_free_variant": "yoloe-v8s-seg-pf.pt",
+        },
+    ),
+    "yoloe-v8m": ModelConfig(
+        name="yoloe-v8m",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-v8m-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": True,
+            "prompt_free_variant": "yoloe-v8m-seg-pf.pt",
+        },
+    ),
+    "yoloe-v8l": ModelConfig(
+        name="yoloe-v8l",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-v8l-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": True,
+            "prompt_free_variant": "yoloe-v8l-seg-pf.pt",
+        },
+    ),
+    # Prompt-free variants (for use without text/visual prompts)
+    "yoloe-11s-pf": ModelConfig(
+        name="yoloe-11s-pf",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11s-seg-pf.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": False,  # Prompt-free uses internal vocabulary
+            "is_prompt_free": True,
+        },
+    ),
+    "yoloe-11m-pf": ModelConfig(
+        name="yoloe-11m-pf",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11m-seg-pf.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": False,
+            "is_prompt_free": True,
+        },
+    ),
+    "yoloe-11l-pf": ModelConfig(
+        name="yoloe-11l-pf",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11l-seg-pf.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": False,
+            "is_prompt_free": True,
+        },
+    ),
 }
 
 
