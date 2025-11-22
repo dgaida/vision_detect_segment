@@ -27,8 +27,10 @@ dependencies = [
 Homepage = "https://github.com/dgaida/vision_detect_segment"
 Repository = "https://github.com/dgaida/vision_detect_segment"
 
-[tool.setuptools]
-packages = ["vision_detect_segment"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vision_detect_segment*"]
+exclude = ["tests*", "docs*"]
 
 [tool.setuptools.package-data]
 vision_detect_segment = ["py.typed"]
