@@ -22,7 +22,6 @@ from ..utils.exceptions import (
 )
 from ..utils.utils import setup_logging, validate_model_requirements, get_optimal_device, Timer, validate_confidence_threshold
 
-# TODO: integrate YOLOE - https://docs.ultralytics.com/de/models/yoloe/ that detects and segments
 # Handle optional dependencies gracefully
 try:
     from ultralytics import YOLO
@@ -242,11 +241,17 @@ class ObjectDetector:
         return detected_objects
 
     def _detect_yoloe(self, image: np.ndarray, threshold: float) -> List[Dict]:
-        """Run YOLOE detection and segmentation."""
-        # Run detection/tracking
+        """
+        Run YOLOE detection and segmentation.
+
+        YOLOE performs both detection and segmentation in one pass.
+        It supports tracking and has built-in segmentation capabilities.
+        """
+        # YOLOE supports tracking similar to YOLO-World
         if self._tracker and self._tracker._use_yolo_tracker:
             results = self._tracker.track(image, threshold)
         else:
+            # Standard prediction
             results = self._model.predict(image, conf=threshold, max_det=20, verbose=False)
 
         detected_objects = []
@@ -255,7 +260,7 @@ class ObjectDetector:
         if boxes is None:
             return detected_objects
 
-        # Extract detections
+        # Extract detection information
         for i, box in enumerate(boxes):
             cls = int(boxes.cls[i])
             class_name = results[0].names[cls]
@@ -271,29 +276,39 @@ class ObjectDetector:
 
             # Add track ID if available
             if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
-                obj_dict["track_id"] = int(results[0].boxes.id[i])
+                track_id = int(results[0].boxes.id[i])
+                obj_dict["track_id"] = track_id
 
             detected_objects.append(obj_dict)
 
-        # Extract segmentation masks (built-in with YOLOE)
+        # Extract track IDs if available
+        track_ids = None
+        if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
+            track_ids = results[0].boxes.id.cpu().numpy().astype(int)
+
+        # YOLOE has built-in segmentation masks
+        # Extract masks if available
         if hasattr(results[0], "masks") and results[0].masks is not None:
-            masks_data = results[0].masks.data
+            masks_data = results[0].masks.data  # Tensor of masks
 
             for i, obj in enumerate(detected_objects):
                 if i < len(masks_data):
+                    # Convert mask to numpy
                     mask = masks_data[i].cpu().numpy()
+
+                    # Convert to uint8 format (0-255)
                     mask_8u = (mask * 255).astype(np.uint8)
 
+                    # Serialize mask for Redis
                     obj["mask_data"] = self._serialize_mask(mask_8u)
                     obj["has_mask"] = True
                     obj["mask_shape"] = list(mask_8u.shape)
                     obj["mask_dtype"] = str(mask_8u.dtype)
 
-        # Create supervision detections
-        track_ids = None
-        if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
-            track_ids = results[0].boxes.id.cpu().numpy().astype(int)
+                    if self.verbose:
+                        self._logger.debug(f"Added segmentation mask for {obj['label']}")
 
+        # Create supervision detections
         self._create_supervision_detections(results, detected_objects, track_ids)
 
         # Publish to Redis
@@ -530,12 +545,22 @@ class ObjectDetector:
         model_config = MODEL_CONFIGS[self._model_id]
         model_path = model_config.model_params["model_path"]
 
+        # Initialize YOLOE model
         model = YOLOE(model_path)
 
-        # Set classes for prompted models
+        # Check if prompt-free variant
         is_prompt_free = model_config.model_params.get("is_prompt_free", False)
+
         if not is_prompt_free and model_config.model_params.get("supports_prompts", True):
+            # Set classes for prompted models (text prompts)
+            # This allows open-vocabulary detection
             model.set_classes(self._object_labels[0], model.get_text_pe(self._object_labels[0]))
+            if self.verbose:
+                self._logger.info(f"YOLOE model loaded with {len(self._object_labels[0])} text prompts")
+        else:
+            # Prompt-free models use internal vocabulary (1200+ classes)
+            if self.verbose:
+                self._logger.info("YOLOE prompt-free model loaded with internal vocabulary")
 
         return model, None
 
@@ -561,10 +586,14 @@ class ObjectDetector:
         self._object_labels[0].append(label.lower())
 
         if "yoloe" in self._model_id.lower():
+            # Check if it's a prompt-free variant
             model_config = MODEL_CONFIGS.get(self._model_id)
             if model_config and not model_config.model_params.get("is_prompt_free", False):
+                # Re-set classes for prompted YOLOE models
                 self._model.set_classes(self._object_labels[0], self._model.get_text_pe(self._object_labels[0]))
-        if self._model_id == "grounding_dino":
+                if self.verbose:
+                    self._logger.info(f"Updated YOLOE classes with new label: {label}")
+        elif self._model_id == "grounding_dino":
             self._processed_labels = ObjectDetector._preprocess_labels(self._object_labels, self._model_id)
         elif self._model_id == "yolo-world":
             self._model.set_classes(self._object_labels[0])

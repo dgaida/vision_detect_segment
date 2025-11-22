@@ -306,10 +306,12 @@ def validate_model_requirements(model_name: str) -> None:
     Raises:
         DependencyError: If required dependencies are missing
     """
+    # TODO: not applicable to list here all models
     requirements_map = {
         "owlv2": ["transformers", "torch"],
         "grounding_dino": ["transformers", "torch"],
         "yolo-world": ["ultralytics", "torch"],
+        "yoloe-11s": ["ultralytics", "torch"],
     }
 
     if model_name not in requirements_map:
