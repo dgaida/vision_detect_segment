@@ -10,6 +10,8 @@ from ..utils.utils import setup_logging, get_optimal_device, Timer, validate_ima
 
 # Handle optional dependencies gracefully
 try:
+    # TODO: SAM2 und bald auch SAM3 kann man auch von ultralytics erhalten. besser von dort nutzen.
+    #  https://docs.ultralytics.com/de/models/sam-2/
     from sam2.sam2_image_predictor import SAM2ImagePredictor
 
     SAM2_AVAILABLE = True

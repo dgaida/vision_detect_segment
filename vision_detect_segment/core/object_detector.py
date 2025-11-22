@@ -22,6 +22,7 @@ from ..utils.exceptions import (
 )
 from ..utils.utils import setup_logging, validate_model_requirements, get_optimal_device, Timer, validate_confidence_threshold
 
+# TODO: integrate YOLOE - https://docs.ultralytics.com/de/models/yoloe/ that detects and segments
 # Handle optional dependencies gracefully
 try:
     from ultralytics import YOLO
