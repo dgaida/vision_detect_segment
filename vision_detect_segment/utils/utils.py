@@ -26,6 +26,7 @@ def setup_logging(verbose: bool = False, log_file: Optional[str] = None) -> logg
 
     # Avoid duplicate handlers
     if logger.handlers:
+        print("utils.py: using an already existent logger")
         return logger
 
     level = logging.DEBUG if verbose else logging.INFO
@@ -312,6 +313,7 @@ def validate_model_requirements(model_name: str) -> None:
         "grounding_dino": ["transformers", "torch"],
         "yolo-world": ["ultralytics", "torch"],
         "yoloe-11s": ["ultralytics", "torch"],
+        "yoloe-11l": ["ultralytics", "torch"],
     }
 
     if model_name not in requirements_map:
@@ -401,8 +403,8 @@ class Timer:
 
         if self._logger:
             self._logger.info(message)
-        else:
-            print(message)
+        # else:
+        #     print(message)
 
     def elapsed(self) -> float:
         """Get elapsed time since start."""

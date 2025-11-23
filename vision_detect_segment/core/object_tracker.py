@@ -55,7 +55,7 @@ class ObjectTracker:
         Returns:
             The result object from the YOLO model (ultralytics.engine.results.Results)
         """
-        print("track", self.enable_tracking)
+        # print("track", self.enable_tracking)
 
         if not self._use_yolo_tracker:
             # For OWL-V2 / DINO this method is not used
