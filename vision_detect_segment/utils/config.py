@@ -119,6 +119,7 @@ class VisionConfig:
             "battery",
             "batteries",
             "screwdriver",
+            "screw",
         ]
 
         food_items = [
