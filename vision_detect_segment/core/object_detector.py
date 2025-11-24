@@ -172,7 +172,7 @@ class ObjectDetector:
         Returns a list of detections, optionally with track IDs.
 
         Args:
-            image: Input image as numpy array
+            image: Input image as numpy array in RGB format
             confidence_threshold: Minimum confidence for detections
 
         Returns:
@@ -274,7 +274,7 @@ class ObjectDetector:
             obj_dict = {
                 "label": class_name,
                 "confidence": confidence,
-                "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y_max},
+                "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
                 "has_mask": False,
             }
 
@@ -350,9 +350,7 @@ class ObjectDetector:
         if self._tracker and self._tracker.enable_tracking:
             try:
                 detections = sv.Detections(
-                    xyxy=boxes.cpu().numpy(),
-                    confidence=scores.cpu().numpy(),
-                    class_id=np.zeros(len(boxes), dtype=int)
+                    xyxy=boxes.cpu().numpy(), confidence=scores.cpu().numpy(), class_id=np.zeros(len(boxes), dtype=int)
                 )
                 tracked_detections = self._tracker.update_with_detections(detections)
                 track_ids = tracked_detections.tracker_id
@@ -374,9 +372,7 @@ class ObjectDetector:
         detected_objects = self._apply_label_stabilization(detected_objects, track_ids)
 
         # Create supervision detections
-        self._create_supervision_detections_from_results(results[0],
-                                                         [obj["label"] for obj in detected_objects],
-                                                         track_ids)
+        self._create_supervision_detections_from_results(results[0], [obj["label"] for obj in detected_objects], track_ids)
 
         # Add segmentation if available
         detected_objects = self._add_segmentation(detected_objects, image, results[0]["boxes"])

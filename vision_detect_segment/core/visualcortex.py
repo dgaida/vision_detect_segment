@@ -2,6 +2,7 @@ import numpy as np
 from typing import List, Optional, Dict, Any
 import torch
 import supervision as sv
+import cv2
 
 from .object_detector import ObjectDetector
 from ..utils.config import VisionConfig, get_default_config
@@ -187,9 +188,12 @@ class VisualCortex:
             # Store current image
             self._img_work = image
 
+            # Convert to RGB for detection models
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
             # Run detection with timing
             with Timer("Object detection", self._logger if self.verbose else None):
-                detected_objects = self._run_detection()
+                detected_objects = self._run_detection(image_rgb)
 
             # Create annotated frame with timing
             with Timer("Annotation", self._logger if self.verbose else None):
@@ -271,13 +275,18 @@ class VisualCortex:
         return self._device
 
     # Private methods
-    def _run_detection(self) -> List[Dict]:
-        """Run object detection on current image."""
-        if self._img_work is None or self._object_detector is None:
+    def _run_detection(self, image_rgb: np.ndarray) -> List[Dict]:
+        """
+        Run object detection on RGB image.
+
+        Args:
+            image_rgb: Input image in RGB format (required for detection models)
+        """
+        if image_rgb is None or self._object_detector is None:
             return []
 
         try:
-            return self._object_detector.detect_objects(self._img_work)
+            return self._object_detector.detect_objects(image_rgb)
         except Exception as e:
             if self.verbose:
                 self._logger.error(f"Detection failed: {e}")
