@@ -198,8 +198,7 @@ class ObjectDetector:
             return []
 
     def _detect_yolo(self, image: np.ndarray, threshold: float) -> List[Dict]:
-        """Run YOLO-World detection."""
-        # results = self._model.predict(image, max_det=20, conf=threshold, verbose=False)
+        """Run YOLO-World detection with label stabilization."""
         if self._tracker and self._tracker._use_yolo_tracker:
             results = self._tracker.track(image, threshold)
         else:
@@ -225,15 +224,21 @@ class ObjectDetector:
             }
             detected_objects.append(obj_dict)
 
-        # Update supervision detections (with optional tracker IDs)
+        # Extract track IDs
         track_ids = None
         if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
             track_ids = results[0].boxes.id.cpu().numpy().astype(int)
 
-        self._create_supervision_detections(results, detected_objects, track_ids)
+            # Add track IDs to objects
+            for i, obj in enumerate(detected_objects):
+                if i < len(track_ids):
+                    obj["track_id"] = int(track_ids[i])
+
+        # ✅ Apply label stabilization
+        detected_objects = self._apply_label_stabilization(detected_objects, track_ids)
 
         # Update supervision detections
-        # self._create_supervision_detections(results, detected_objects)
+        self._create_supervision_detections(results, detected_objects, track_ids)
 
         # Publish to Redis
         self._publish_detections(detected_objects, "yolo-world")
@@ -251,7 +256,6 @@ class ObjectDetector:
         if self._tracker and self._tracker._use_yolo_tracker:
             results = self._tracker.track(image, threshold)
         else:
-            # Standard prediction
             results = self._model.predict(image, conf=threshold, max_det=20, verbose=False)
 
         detected_objects = []
@@ -270,7 +274,7 @@ class ObjectDetector:
             obj_dict = {
                 "label": class_name,
                 "confidence": confidence,
-                "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
+                "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y_max},
                 "has_mask": False,
             }
 
@@ -281,25 +285,23 @@ class ObjectDetector:
 
             detected_objects.append(obj_dict)
 
-        # Extract track IDs if available
+        # Extract track IDs
         track_ids = None
         if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
             track_ids = results[0].boxes.id.cpu().numpy().astype(int)
 
-        # YOLOE has built-in segmentation masks
-        # Extract masks if available
+        # ✅ Apply label stabilization
+        detected_objects = self._apply_label_stabilization(detected_objects, track_ids)
+
+        # Handle segmentation masks (YOLOE has built-in segmentation)
         if hasattr(results[0], "masks") and results[0].masks is not None:
-            masks_data = results[0].masks.data  # Tensor of masks
+            masks_data = results[0].masks.data
 
             for i, obj in enumerate(detected_objects):
                 if i < len(masks_data):
-                    # Convert mask to numpy
                     mask = masks_data[i].cpu().numpy()
-
-                    # Convert to uint8 format (0-255)
                     mask_8u = (mask * 255).astype(np.uint8)
 
-                    # Serialize mask for Redis
                     obj["mask_data"] = self._serialize_mask(mask_8u)
                     obj["has_mask"] = True
                     obj["mask_shape"] = list(mask_8u.shape)
@@ -317,7 +319,7 @@ class ObjectDetector:
         return detected_objects
 
     def _detect_transformer_based(self, image: np.ndarray, threshold: float) -> List[Dict]:
-        """Run OWL-V2 or Grounding-DINO detection."""
+        """Run OWL-V2 or Grounding-DINO detection with label stabilization."""
         h, w = image.shape[:2]
 
         # Prepare inputs
@@ -332,8 +334,6 @@ class ObjectDetector:
             results = self._processor.post_process_object_detection(
                 outputs=outputs, target_sizes=[(h, w)], threshold=threshold
             )
-            # results = self._tracker.track(image, threshold)
-
             labels = self._extract_owlv2_labels(results)
         else:  # grounding_dino
             results = self._processor.post_process_grounded_object_detection(
@@ -344,46 +344,77 @@ class ObjectDetector:
         boxes = results[0]["boxes"]
         scores = results[0]["scores"]
 
-        # detected_objects = []
-        track_ids = None  # <--- wichtig, sonst Exception wenn Tracking aus ist
+        track_ids = None
 
         # ✅ Tracking (optional)
         if self._tracker and self._tracker.enable_tracking:
-            # print("tracking")
             try:
                 detections = sv.Detections(
-                    xyxy=boxes.cpu().numpy(), confidence=scores.cpu().numpy(), class_id=np.zeros(len(boxes), dtype=int)
+                    xyxy=boxes.cpu().numpy(),
+                    confidence=scores.cpu().numpy(),
+                    class_id=np.zeros(len(boxes), dtype=int)
                 )
                 tracked_detections = self._tracker.update_with_detections(detections)
-
-                # Replace the boxes with tracked ones for visualization/publishing
-                # tracked_boxes = tracked_detections.xyxy
                 track_ids = tracked_detections.tracker_id
-
-                # Attach IDs to your object dicts
-                detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
-                for i, obj in enumerate(detected_objects):
-                    if i < len(track_ids):
-                        obj["track_id"] = int(track_ids[i])
 
             except Exception as e:
                 if self.verbose:
                     self._logger.warning(f"Tracking update failed: {e}")
-                detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
-        else:
-            detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
 
         # Convert to object dictionaries
-        # detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
+        detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
 
-        # Create supervision detections (with optional tracker IDs)
-        self._create_supervision_detections_from_results(results[0], labels, track_ids)
+        # Attach track IDs
+        if track_ids is not None:
+            for i, obj in enumerate(detected_objects):
+                if i < len(track_ids):
+                    obj["track_id"] = int(track_ids[i])
+
+        # ✅ Apply label stabilization
+        detected_objects = self._apply_label_stabilization(detected_objects, track_ids)
+
+        # Create supervision detections
+        self._create_supervision_detections_from_results(results[0],
+                                                         [obj["label"] for obj in detected_objects],
+                                                         track_ids)
 
         # Add segmentation if available
         detected_objects = self._add_segmentation(detected_objects, image, results[0]["boxes"])
 
         # Publish to Redis
         self._publish_detections(detected_objects, self._model_id)
+
+        return detected_objects
+
+    def _apply_label_stabilization(self, detected_objects: List[Dict], track_ids: Optional[np.ndarray]) -> List[Dict]:
+        """
+        Apply label stabilization based on tracking history.
+
+        Args:
+            detected_objects: List of detected object dictionaries
+            track_ids: Array of track IDs corresponding to detections
+
+        Returns:
+            List of detected objects with stabilized labels
+        """
+        if not self._tracker or not self._tracker.enable_tracking or track_ids is None:
+            return detected_objects
+
+        # Extract current labels
+        current_labels = [obj["label"] for obj in detected_objects]
+
+        # Get stabilized labels from tracker
+        stabilized_labels = self._tracker.update_label_history(track_ids, current_labels)
+
+        # Update detected objects with stabilized labels
+        for obj, stabilized_label in zip(detected_objects, stabilized_labels):
+            obj["label"] = stabilized_label
+
+        # Clean up lost tracks
+        if len(track_ids) > 0:
+            lost_tracks = self._tracker.detect_lost_tracks(track_ids)
+            if lost_tracks:
+                self._tracker.cleanup_lost_tracks(lost_tracks)
 
         return detected_objects
 

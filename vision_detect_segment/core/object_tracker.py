@@ -1,6 +1,11 @@
+"""
+Enhanced Object Tracker with label stabilization based on tracking history.
+"""
+
 import numpy as np
 import supervision as sv
-from typing import Any
+from typing import Any, Dict, List, Optional
+from collections import Counter, defaultdict
 
 # --- Kompatibilitätsimport für ByteTrack ---
 try:
@@ -13,36 +18,189 @@ from ..utils.exceptions import DetectionError
 
 class ObjectTracker:
     """
-    Unified object tracking interface that wraps YOLO built-in tracking
-    and ByteTrack tracking for transformer-based models.
+    Unified object tracking interface with label stabilization.
+    
+    Features:
+    - Wraps YOLO built-in tracking and ByteTrack for transformer models
+    - Tracks label history for each tracked object
+    - Stabilizes labels after 10 frames by using most common label
     """
 
-    def __init__(self, model: Any, model_id: str, enable_tracking: bool = False, verbose: bool = False):
+    def __init__(
+        self, 
+        model: Any, 
+        model_id: str, 
+        enable_tracking: bool = False, 
+        verbose: bool = False,
+        stabilization_frames: int = 10
+    ):
         """
         Args:
             model: The underlying detection model (YOLO, OWL-V2, etc.)
             model_id: Identifier for the model type
             enable_tracking: Whether to enable persistent tracking
             verbose: Enable verbose logging
+            stabilization_frames: Number of frames to track before stabilizing label (default: 10)
         """
         self.model = model
         self.model_id = model_id.lower()
         self.enable_tracking = enable_tracking
         self.verbose = verbose
+        self.stabilization_frames = stabilization_frames
 
         # Use Ultralytics tracker for YOLO models, ByteTrack for others
         self._use_yolo_tracker = "yolo" in self.model_id
         self._tracker = ByteTrack() if enable_tracking and not self._use_yolo_tracker else None
 
+        # Label tracking data structures
+        # Format: {track_id: [label1, label2, label3, ...]}
+        self._label_history: Dict[int, List[str]] = defaultdict(list)
+        
+        # Format: {track_id: stabilized_label}
+        self._stabilized_labels: Dict[int, str] = {}
+        
+        # Format: {track_id: frame_count}
+        self._frame_counts: Dict[int, int] = defaultdict(int)
+
     def reset(self):
-        """Reset internal tracking state."""
+        """Reset internal tracking state and label history."""
         if self._tracker:
             self._tracker.reset()
         if self._use_yolo_tracker and hasattr(self.model, "tracker"):
             try:
                 self.model.tracker.reset()
             except Exception as e:
-                print(e)
+                if self.verbose:
+                    print(f"Warning: Could not reset YOLO tracker: {e}")
+        
+        # Reset label tracking
+        self._label_history.clear()
+        self._stabilized_labels.clear()
+        self._frame_counts.clear()
+
+    def update_label_history(self, track_ids: np.ndarray, labels: List[str]) -> List[str]:
+        """
+        Update label history for tracked objects and return stabilized labels.
+        
+        Args:
+            track_ids: Array of track IDs
+            labels: List of detected labels corresponding to track IDs
+            
+        Returns:
+            List of stabilized labels (using most common label after stabilization_frames)
+        """
+        if not self.enable_tracking or track_ids is None or len(track_ids) == 0:
+            return labels
+        
+        stabilized_labels = []
+        
+        for track_id, current_label in zip(track_ids, labels):
+            track_id = int(track_id)
+            
+            # Check if this is a new track or if tracking was lost and resumed
+            if track_id not in self._label_history or len(self._label_history[track_id]) == 0:
+                # New track - reset everything for this ID
+                self._label_history[track_id] = []
+                self._stabilized_labels.pop(track_id, None)
+                self._frame_counts[track_id] = 0
+                if self.verbose:
+                    print(f"New track detected: ID {track_id}")
+            
+            # Increment frame count
+            self._frame_counts[track_id] += 1
+            
+            # Add current label to history
+            self._label_history[track_id].append(current_label)
+            
+            # Check if we should stabilize the label
+            if self._frame_counts[track_id] >= self.stabilization_frames:
+                # Check if we need to compute stabilized label
+                if track_id not in self._stabilized_labels:
+                    # Use the most common label from the history
+                    label_counter = Counter(self._label_history[track_id])
+                    most_common_label = label_counter.most_common(1)[0][0]
+                    self._stabilized_labels[track_id] = most_common_label
+                    
+                    if self.verbose:
+                        print(f"Track ID {track_id}: Label stabilized to '{most_common_label}' "
+                              f"after {self._frame_counts[track_id]} frames")
+                        print(f"  Label history: {dict(label_counter)}")
+                
+                # Use stabilized label
+                stabilized_labels.append(self._stabilized_labels[track_id])
+            else:
+                # Not yet stabilized - use current detection
+                stabilized_labels.append(current_label)
+        
+        return stabilized_labels
+
+    def detect_lost_tracks(self, current_track_ids: np.ndarray) -> List[int]:
+        """
+        Detect tracks that have been lost (no longer in current detections).
+        
+        Args:
+            current_track_ids: Array of currently active track IDs
+            
+        Returns:
+            List of track IDs that were lost
+        """
+        if current_track_ids is None or len(current_track_ids) == 0:
+            return []
+        
+        current_ids = set(int(tid) for tid in current_track_ids)
+        known_ids = set(self._label_history.keys())
+        lost_ids = known_ids - current_ids
+        
+        return list(lost_ids)
+
+    def cleanup_lost_tracks(self, lost_track_ids: List[int]):
+        """
+        Clean up data for tracks that have been lost.
+        
+        Args:
+            lost_track_ids: List of track IDs to clean up
+        """
+        for track_id in lost_track_ids:
+            if self.verbose and track_id in self._stabilized_labels:
+                print(f"Track ID {track_id} lost (label was: '{self._stabilized_labels[track_id]}')")
+            
+            # Remove from all tracking dictionaries
+            self._label_history.pop(track_id, None)
+            self._stabilized_labels.pop(track_id, None)
+            self._frame_counts.pop(track_id, None)
+
+    def get_track_info(self, track_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get tracking information for a specific track ID.
+        
+        Args:
+            track_id: Track ID to query
+            
+        Returns:
+            Dictionary with tracking info or None if track doesn't exist
+        """
+        if track_id not in self._label_history:
+            return None
+        
+        return {
+            "track_id": track_id,
+            "frame_count": self._frame_counts[track_id],
+            "label_history": self._label_history[track_id],
+            "stabilized_label": self._stabilized_labels.get(track_id),
+            "is_stabilized": track_id in self._stabilized_labels
+        }
+
+    def get_all_track_stats(self) -> Dict[int, Dict[str, Any]]:
+        """
+        Get tracking statistics for all active tracks.
+        
+        Returns:
+            Dictionary mapping track IDs to their tracking info
+        """
+        return {
+            track_id: self.get_track_info(track_id)
+            for track_id in self._label_history.keys()
+        }
 
     # ----------------------------------------------------------------------
     # 🟢 YOLO tracking
@@ -55,8 +213,6 @@ class ObjectTracker:
         Returns:
             The result object from the YOLO model (ultralytics.engine.results.Results)
         """
-        # print("track", self.enable_tracking)
-
         if not self._use_yolo_tracker:
             # For OWL-V2 / DINO this method is not used
             raise DetectionError("YOLO tracking is not applicable to transformer-based models")
@@ -64,10 +220,22 @@ class ObjectTracker:
         try:
             if self.enable_tracking:
                 # Run Ultralytics tracking — persist ensures track IDs stay consistent
-                results = self.model.track(image, persist=True, stream=False, verbose=False, conf=threshold, max_det=max_det)
+                results = self.model.track(
+                    image, 
+                    persist=True, 
+                    stream=False, 
+                    verbose=False, 
+                    conf=threshold, 
+                    max_det=max_det
+                )
             else:
                 # Fall back to standard detection if tracking disabled
-                results = self.model.predict(image, conf=threshold, max_det=max_det, verbose=False)
+                results = self.model.predict(
+                    image, 
+                    conf=threshold, 
+                    max_det=max_det, 
+                    verbose=False
+                )
 
             return results
 
