@@ -6,6 +6,7 @@ A flexible Python package for real-time object detection and segmentation with R
 
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/dgaida/vision_detect_segment/branch/master/graph/badge.svg)](https://codecov.io/gh/dgaida/vision_detect_segment)
 [![Code Quality](https://github.com/dgaida/vision_detect_segment/actions/workflows/lint.yml/badge.svg)](https://github.com/dgaida/vision_detect_segment/actions/workflows/lint.yml)
 [![Tests](https://github.com/dgaida/vision_detect_segment/actions/workflows/tests.yml/badge.svg)](https://github.com/dgaida/vision_detect_segment/actions/workflows/tests.yml)
 [![CodeQL](https://github.com/dgaida/vision_detect_segment/actions/workflows/codeql.yml/badge.svg)](https://github.com/dgaida/vision_detect_segment/actions/workflows/codeql.yml)
