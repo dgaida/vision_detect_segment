@@ -12,7 +12,6 @@ from vision_detect_segment.core.object_detector import ObjectDetector
 from vision_detect_segment.utils.config import create_test_config
 from vision_detect_segment.utils.exceptions import (
     ModelLoadError,
-    DependencyError,
 )
 
 
@@ -534,7 +533,7 @@ class TestObjectDetectorModelLoading:
         config = create_test_config()
 
         with patch("vision_detect_segment.core.object_detector.YOLO_AVAILABLE", False):
-            with pytest.raises(DependencyError):
+            with pytest.raises(ModelLoadError):
                 ObjectDetector(
                     device="cpu",
                     model_id="yolo-world",
