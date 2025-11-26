@@ -287,7 +287,7 @@ class TestObjectSegmenterSAM2Specific:
         box = torch.tensor([50.0, 50.0, 150.0, 150.0])
 
         # Mock SAM2 prediction
-        mock_masks = np.random.rand(3, 480, 640) > 0.5
+        mock_masks = np.random.rand(3, 480, 640)
         mock_scores = np.array([0.95, 0.85, 0.75])
 
         sam2_segmenter._segmenter.predict = Mock(return_value=(mock_masks, mock_scores, None))
@@ -307,7 +307,7 @@ class TestObjectSegmenterSAM2Specific:
         box = torch.tensor([20.0, 20.0, 80.0, 80.0])
 
         # Mock prediction with proper masks
-        mock_masks = np.random.rand(2, 200, 200) > 0.25
+        mock_masks = np.random.rand(2, 200, 200)
         mock_scores = np.array([0.9, 0.7])
 
         sam2_segmenter._segmenter.set_image = Mock()
