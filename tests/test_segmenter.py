@@ -172,24 +172,31 @@ class TestObjectSegmenterSegmentation:
         image = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
         box = torch.tensor([10.0, 20.0, 100.0, 200.0])
 
-        # Mock SAM2 prediction
+        # Mock SAM2 prediction - return tuple of (masks, scores, logits)
         mock_masks = np.random.rand(3, 480, 640) > 0.5
         mock_scores = np.array([0.9, 0.8, 0.7])
         mock_segmenter_sam2._segmenter.predict = Mock(return_value=(mock_masks, mock_scores, None))
         mock_segmenter_sam2._segmenter.set_image = Mock()
 
-        mask_8u, mask_binary = mock_segmenter_sam2.segment_box_in_image(box, image)
+        # Mock the _run_sam2_inference to return proper values
+        with patch.object(mock_segmenter_sam2, "_run_sam2_inference") as mock_inference:
+            mock_mask = (mock_masks[0] * 255).astype(np.uint8)
+            mock_inference.return_value = (mock_mask, mock_masks[0] > 0)
 
-        assert mask_8u is not None
-        assert mask_binary is not None
+            mask_8u, mask_binary = mock_segmenter_sam2.segment_box_in_image(box, image)
+
+            assert mask_8u is not None
+            assert mask_binary is not None
 
     def test_segment_box_in_image_error_handling(self, mock_segmenter_fastsam):
         """Test error handling during segmentation."""
         image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
         box = torch.tensor([10, 20, 50, 60])
 
+        # Mock segmentation to raise exception
         mock_segmenter_fastsam._segmenter.side_effect = Exception("Segmentation failed")
 
+        # Should raise SegmentationError
         with pytest.raises(SegmentationError):
             mock_segmenter_fastsam.segment_box_in_image(box, image)
 
@@ -286,11 +293,16 @@ class TestObjectSegmenterSAM2Specific:
         sam2_segmenter._segmenter.predict = Mock(return_value=(mock_masks, mock_scores, None))
         sam2_segmenter._segmenter.set_image = Mock()
 
-        mask_8u, mask_binary = sam2_segmenter._segment_box_with_sam2(box, image)
+        # Mock _run_sam2_inference to return proper result
+        with patch.object(sam2_segmenter, "_run_sam2_inference") as mock_inference:
+            mock_mask = (mock_masks[0] * 255).astype(np.uint8)
+            mock_inference.return_value = (mock_mask, mock_masks[0] > 0)
 
-        assert mask_8u is not None
-        assert mask_binary is not None
-        assert sam2_segmenter._segmenter.set_image.called
+            mask_8u, mask_binary = sam2_segmenter._segment_box_with_sam2(box, image)
+
+            assert mask_8u is not None
+            assert mask_binary is not None
+            assert sam2_segmenter._segmenter.set_image.called
 
     def test_run_sam2_inference(self, sam2_segmenter):
         """Test SAM2 inference run."""

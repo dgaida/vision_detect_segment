@@ -7,6 +7,8 @@ import numpy as np
 from unittest.mock import Mock, patch
 import supervision as sv
 
+# import copy
+
 from vision_detect_segment.core.visualcortex import VisualCortex
 from vision_detect_segment.utils.config import create_test_config
 
@@ -292,16 +294,18 @@ class TestVisualCortexAnnotation:
     def test_scale_detections(self, cortex_for_annotation):
         """Test scaling detection coordinates."""
         detections = sv.Detections(
-            xyxy=np.array([[10, 20, 100, 200]]),
+            xyxy=np.array([[10.0, 20.0, 100.0, 200.0]]),
             confidence=np.array([0.9]),
             class_id=np.array([0]),
         )
 
         scaled = cortex_for_annotation._scale_detections(detections, 2.0, 1.5)
 
-        # Check scaling
-        assert scaled.xyxy[0][2] == 200  # x scaled by 2.0
-        assert scaled.xyxy[0][3] == 300  # y scaled by 1.5
+        # Check scaling - new detection object should have scaled coordinates
+        assert scaled.xyxy[0][0] == 20.0  # x_min scaled by 2.0
+        assert scaled.xyxy[0][1] == 30.0  # y_min scaled by 1.5
+        assert scaled.xyxy[0][2] == 200.0  # x_max scaled by 2.0
+        assert scaled.xyxy[0][3] == 300.0  # y_max scaled by 1.5
 
 
 class TestVisualCortexGetters:
@@ -363,7 +367,7 @@ class TestVisualCortexGetters:
         assert len(objects) == 2
         assert objects[0]["label"] == "obj1"
 
-        # Should be a copy
+        # Test that it's a deep copy - modifying should not affect original
         objects[0]["label"] = "modified"
         assert cortex_with_data._detected_objects[0]["label"] == "obj1"
 

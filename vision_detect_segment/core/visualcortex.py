@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 import torch
 import supervision as sv
 import cv2
+import copy
 
 from .object_detector import ObjectDetector
 from ..utils.config import VisionConfig, get_default_config
@@ -258,7 +259,7 @@ class VisualCortex:
 
     def get_detected_objects(self) -> List[Dict]:
         """Get list of detected objects (returns copy to prevent external modification)."""
-        return self._detected_objects.copy()
+        return copy.deepcopy(self._detected_objects)
 
     def get_object_labels(self) -> List[List[str]]:
         """Get list of detectable object labels."""
@@ -366,7 +367,7 @@ class VisualCortex:
     def _scale_detections(self, detections: sv.Detections, scale_x: float, scale_y: float) -> sv.Detections:
         """Scale detection coordinates for resized image."""
         try:
-            scaled_xyxy = detections.xyxy.copy()
+            scaled_xyxy = copy.deepcopy(detections.xyxy)
             scaled_xyxy[:, [0, 2]] *= scale_x  # Scale x-coordinates
             scaled_xyxy[:, [1, 3]] *= scale_y  # Scale y-coordinates
 
