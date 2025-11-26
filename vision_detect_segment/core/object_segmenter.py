@@ -100,7 +100,32 @@ class ObjectSegmenter:
                 self._logger.warning("Segmentation will be disabled")
 
     def _initialize_segmenter(self, segmentation_model: Optional[str], edgetam_config_path=None, edgetam_weights_path=None):
-        """Initialize the segmentation model."""
+        """Initialize the segmentation model based on availability and configuration.
+
+        Attempts to load segmentation models in the following priority order:
+        1. EdgeTAM (if explicitly requested and available)
+        2. SAM2 (if model name contains 'sam2' and SAM2 is available)
+        3. FastSAM (as fallback if available)
+
+        Args:
+            segmentation_model: Path or identifier for the segmentation model. Can be:
+                - A string containing 'edgetam' to load EdgeTAM
+                - A string containing 'sam2' to load SAM2 (e.g., 'facebook/sam2.1-hiera-tiny')
+                - None to use default FastSAM
+            edgetam_config_path: Optional path to EdgeTAM configuration YAML file.
+                Only used if segmentation_model indicates EdgeTAM.
+            edgetam_weights_path: Optional path to EdgeTAM model weights file.
+                Only used if segmentation_model indicates EdgeTAM.
+
+        Raises:
+            DependencyError: If EdgeTAM is requested but not available, or if no
+                segmentation models are available at all.
+            ModelLoadError: If a compatible segmentation model cannot be loaded.
+
+        Note:
+            Sets self._model_id to identify which model was loaded ('edgetam',
+            'sam2.1-hiera-tiny', or 'fastsam').
+        """
         if segmentation_model and isinstance(segmentation_model, str) and "edgetam" in segmentation_model.lower():
             if EDGETAM_AVAILABLE:
                 self._model_id = "edgetam"
@@ -234,7 +259,29 @@ class ObjectSegmenter:
     def _segment_box_with_fastsam(
         self, box: torch.Tensor, img_work: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Segment using FastSAM model."""
+        """Perform segmentation using the FastSAM model.
+
+        Runs FastSAM inference on the provided image using the specified bounding box
+        as a prompt. Handles image size constraints required by FastSAM (multiple of 32).
+
+        Args:
+            box: Bounding box tensor with coordinates [x_min, y_min, x_max, y_max].
+                Will be converted to list format for FastSAM.
+            img_work: Input image as numpy array in BGR format, shape (H, W, 3).
+
+        Returns:
+            A tuple containing:
+                - mask_8u: Uint8 mask with values 0-255, same shape as input image (H, W),
+                  or None if segmentation fails or produces empty mask.
+                - mask_binary: Boolean mask indicating segmented regions (True for object),
+                  same shape as input image (H, W), or None if segmentation fails.
+
+        Note:
+            - Automatically adjusts image size to nearest multiple of 32 for FastSAM
+            - Uses retina_masks=True for higher quality segmentation
+            - Clears GPU cache after inference to prevent memory issues
+            - Returns None for both masks if FastSAM produces no masks or empty masks
+        """
         input_box = box.detach().cpu().numpy()
         x_min, y_min, x_max, y_max = map(int, input_box)
         input_box = [x_min, y_min, x_max, y_max]
@@ -282,7 +329,31 @@ class ObjectSegmenter:
     def _segment_box_with_sam2(
         self, box: torch.Tensor, img_work: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Segment using SAM2 model."""
+        """Perform segmentation using the SAM2 model.
+
+        Runs SAM2 inference with automatic mixed precision on CUDA devices for
+        improved performance. Handles the complete SAM2 pipeline including image
+        encoding and mask prediction.
+
+        Args:
+            box: Bounding box tensor with float coordinates [x_min, y_min, x_max, y_max].
+                Must be detachable to CPU for SAM2 processing.
+            img_work: Input image as numpy array in RGB format, shape (H, W, 3).
+                SAM2 expects RGB input (unlike FastSAM which uses BGR).
+
+        Returns:
+            A tuple containing:
+                - mask_8u: Uint8 mask with values 0-255, same shape as input image (H, W),
+                  or None if segmentation fails.
+                - mask_binary: Boolean mask indicating segmented regions (True for object),
+                  same shape as input image (H, W), or None if segmentation fails.
+
+        Note:
+            - Uses torch.autocast with bfloat16 on CUDA for faster inference
+            - Runs in torch.inference_mode() for optimal performance
+            - Clears GPU cache after inference to prevent memory issues
+            - Delegates actual inference to _run_sam2_inference method
+        """
         try:
             with torch.inference_mode():
                 if self._device == "cuda":
@@ -298,7 +369,33 @@ class ObjectSegmenter:
     def _run_sam2_inference(
         self, box: torch.Tensor, img_work: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Run SAM2 model inference."""
+        """Execute SAM2 model inference and process the results.
+
+        Performs the core SAM2 prediction with box prompts and selects the best
+        mask from multiple predictions based on confidence scores.
+
+        Args:
+            box: Bounding box tensor with float coordinates [x_min, y_min, x_max, y_max].
+                Will be detached to CPU and converted to numpy for SAM2 predict method.
+            img_work: Input image as numpy array in RGB format, shape (H, W, 3).
+                Must be set in the predictor before calling this method.
+
+        Returns:
+            A tuple containing:
+                - mask_8u: Uint8 mask normalized to 0-255 range, shape (H, W),
+                  corresponding to the highest-scoring prediction, or None if prediction fails.
+                - mask_binary: Boolean mask (mask_8u > 0), shape (H, W),
+                  or None if prediction fails.
+
+        Raises:
+            Exception: Logged but not raised if SAM2 inference fails. Returns None values instead.
+
+        Note:
+            - Calls set_image() on the predictor to encode the image
+            - Uses multimask_output=True to get multiple mask candidates
+            - Selects mask with highest confidence score using np.argmax
+            - Normalizes selected mask to 0-255 range for consistency
+        """
         self._segmenter.set_image(img_work)
         input_box = box.detach().cpu().numpy()
 
@@ -326,7 +423,31 @@ class ObjectSegmenter:
 
     @staticmethod
     def _create_mask8u(img_work: np.ndarray, input_box: list, masks) -> np.ndarray:
-        """Extract and process the segmentation mask for FastSAM."""
+        """Create an uint8 mask from FastSAM mask data for a specific bounding box region.
+
+        Extracts the segmentation mask from FastSAM output and ensures it respects
+        the bounding box constraints. Prevents mask overflow beyond the specified region.
+
+        Args:
+            img_work: Input image as numpy array, shape (H, W, 3).
+                Used to determine the full mask dimensions.
+            input_box: Bounding box as list [x_min, y_min, x_max, y_max] with integer coordinates.
+                Defines the region of interest for mask extraction.
+            masks: FastSAM mask output object with a 'data' attribute.
+                Expected to contain tensor masks where masks.data[0] is the primary mask.
+
+        Returns:
+            full_mask: Uint8 numpy array with shape (H, W) matching img_work dimensions.
+                Contains values 0 (background) or 255 (object) only within the bounding box region.
+                All pixels outside the bounding box are set to 0.
+
+        Note:
+            - Applies threshold of 0.5 to convert probability masks to binary
+            - Crops mask to bounding box region before placing in full-sized array
+            - This prevents mask predictions from extending beyond the detection region
+            - The cropping approach handles edge cases where FastSAM might produce
+              masks larger than the specified box
+        """
         x_min, y_min, x_max, y_max = input_box
         mask_data = masks.data[0].cpu().numpy()
 
