@@ -1,0 +1,331 @@
+\documentclass[border=10pt]{standalone}
+\usepackage{tikz}
+\usepackage{tikz-uml}
+
+\begin{document}
+
+\begin{tikzpicture}
+
+% ============================================================================
+% Core Classes
+% ============================================================================
+
+\umlclass[x=0, y=-4]{VisualCortex}{
+  - \_objdetect\_model\_id : str \\
+  - \_device : str \\
+  - \_stream\_name : str \\
+  - \_img\_work : ndarray \\
+  - \_annotated\_frame : ndarray \\
+  - \_detected\_objects : List[Dict] \\
+  - \_processed\_frames : int \\
+  - \_label\_annotator : LabelAnnotator \\
+  - \_corner\_annotator : BoxCornerAnnotator \\
+  - \_halo\_annotator : HaloAnnotator \\
+  - \_object\_detector : ObjectDetector \\
+  - \_streamer : RedisImageStreamer \\
+  - \_config : VisionConfig \\
+  - \_logger : Logger \\
+  + verbose : bool
+}{
+  + \_\_init\_\_(model\_id, device, stream\_name, verbose, config) \\
+  + detect\_objects\_from\_redis() : bool \\
+  + process\_image\_callback(image, metadata, image\_info) \\
+  + add\_detectable\_object(object\_name) \\
+  + get\_current\_image(resize) : ndarray \\
+  + get\_annotated\_image() : ndarray \\
+  + get\_detected\_objects() : List[Dict] \\
+  + get\_object\_labels() : List[List[str]] \\
+  + get\_processed\_frames\_count() : int \\
+  + get\_device() : str \\
+  + clear\_cache() \\
+  + get\_memory\_usage() : Dict \\
+  + get\_stats() : Dict \\
+  - \_initialize\_redis\_streamer() \\
+  - \_setup\_annotators() \\
+  - \_initialize\_object\_detector() \\
+  - \_run\_detection(image\_rgb) : List[Dict] \\
+  - \_create\_annotated\_frame(objects) \\
+  - \_scale\_detections(detections, scale\_x, scale\_y)
+}
+
+\umlclass[x=-12, y=1]{ObjectDetector}{
+  - \_device : str \\
+  - \_model\_id : str \\
+  - \_object\_labels : List[List[str]] \\
+  - \_processed\_labels : Union[List, str] \\
+  - \_model : Any \\
+  - \_processor : Any \\
+  - \_current\_detections : Detections \\
+  - \_current\_labels : ndarray \\
+  - \_redis\_host : str \\
+  - \_redis\_port : int \\
+  - \_stream\_name : str \\
+  - \_config : VisionConfig \\
+  - \_logger : Logger \\
+  - \_segmenter : ObjectSegmenter \\
+  - \_tracker : ObjectTracker \\
+  - \_redis\_broker : RedisMessageBroker \\
+  + verbose : bool
+}{
+  + \_\_init\_\_(device, model\_id, labels, redis\_host, ...) \\
+  + detect\_objects(image, threshold) : List[Dict] \\
+  + add\_label(label) \\
+  + get\_detections() : Detections \\
+  + get\_label\_texts() : ndarray \\
+  + get\_object\_labels() : List[List[str]] \\
+  + get\_device() : str \\
+  + get\_model\_id() : str \\
+  - \_validate\_model\_availability() \\
+  - \_preprocess\_labels(labels, model\_id) \\
+  - \_detect\_yolo(image, threshold) : List[Dict] \\
+  - \_detect\_yoloe(image, threshold) : List[Dict] \\
+  - \_detect\_transformer\_based(image, threshold) : List[Dict] \\
+  - \_apply\_label\_stabilization(objects, track\_ids) \\
+  - \_create\_object\_dicts(results, labels) : List[Dict] \\
+  - \_add\_segmentation(objects, image, boxes) : List[Dict] \\
+  - \_serialize\_mask(mask) : str \\
+  - \_create\_supervision\_detections(results, objects, track\_ids) \\
+  - \_extract\_owlv2\_labels(results) : ndarray \\
+  - \_publish\_detections(objects, method) \\
+  - \_load\_model(model\_id) : Tuple \\
+  - \_load\_yolo\_model() \\
+  - \_load\_yoloe\_model() \\
+  - \_load\_owlv2\_model() \\
+  - \_load\_grounding\_dino\_model()
+}
+
+\umlclass[x=-12, y=-14]{ObjectSegmenter}{
+  - \_device : str \\
+  - \_segmentation\_model : str \\
+  - \_model\_id : str \\
+  - \_segmenter : Any \\
+  - \_config : VisionConfig \\
+  - \_logger : Logger \\
+  + verbose : bool
+}{
+  + \_\_init\_\_(seg\_model, device, verbose, config, ...) \\
+  + segment\_objects(image, detections) : Detections \\
+  + segment\_box\_in\_image(box, img) : Tuple \\
+  + get\_segmenter() : Any \\
+  + get\_model\_id() : str \\
+  + get\_device() : str \\
+  + is\_available() : bool \\
+  + add\_masks2detections(detections) : Detections \\
+  - \_initialize\_segmenter(seg\_model, ...) \\
+  - \_segment\_box\_with\_fastsam(box, img) : Tuple \\
+  - \_segment\_box\_with\_sam2(box, img) : Tuple \\
+  - \_run\_sam2\_inference(box, img) : Tuple \\
+  - \_create\_mask8u(img, input\_box, masks) : ndarray
+}
+
+\umlclass[x=-24, y=1]{ObjectTracker}{
+  - \_use\_yolo\_tracker : bool \\
+  - \_tracker : ByteTrack \\
+  - \_label\_history : Dict[int, List[str]] \\
+  - \_stabilized\_labels : Dict[int, str] \\
+  - \_frame\_counts : Dict[int, int] \\
+  + model : Any \\
+  + model\_id : str \\
+  + enable\_tracking : bool \\
+  + verbose : bool \\
+  + stabilization\_frames : int \\
+  + min\_frames\_for\_display : int
+}{
+  + \_\_init\_\_(model, model\_id, enable\_tracking, verbose, ...) \\
+  + reset() \\
+  + update\_label\_history(track\_ids, labels) : List[str] \\
+  + detect\_lost\_tracks(current\_track\_ids) : List[int] \\
+  + cleanup\_lost\_tracks(lost\_track\_ids) \\
+  + get\_track\_info(track\_id) : Dict \\
+  + get\_all\_track\_stats() : Dict \\
+  + track(image, threshold, max\_det) \\
+  + update\_with\_detections(detections) : Detections
+}
+
+% ============================================================================
+% Configuration Classes
+% ============================================================================
+
+\umlclass[x=12, y=-4]{VisionConfig}{
+  - \_object\_labels : List[str] \\
+  + model : ModelConfig \\
+  + redis : RedisConfig \\
+  + annotation : AnnotationConfig \\
+  + verbose : bool \\
+  + enable\_segmentation : bool
+}{
+  + \_\_post\_init\_\_() \\
+  + get\_object\_labels() : List[List[str]] \\
+  + add\_object\_label(label) \\
+  + set\_object\_labels(labels) \\
+  - \_get\_default\_labels() : List[str]
+}
+
+\umlclass[x=12, y=-10]{ModelConfig}{
+  + name : str \\
+  + confidence\_threshold : float \\
+  + max\_detections : int \\
+  + device\_preference : str \\
+  + model\_params : Dict[str, Any]
+}{
+  + get\_device() : str
+}
+
+\umlclass[x=20, y=-4]{RedisConfig}{
+  + host : str \\
+  + port : int \\
+  + stream\_name : str \\
+  + detection\_stream : str \\
+  + connection\_timeout : int \\
+  + retry\_attempts : int
+}{
+}
+
+\umlclass[x=20, y=-10]{AnnotationConfig}{
+  + text\_scale : float \\
+  + text\_padding : int \\
+  + box\_thickness : int \\
+  + resize\_scale\_factor : float \\
+  + show\_confidence : bool \\
+  + show\_labels : bool
+}{
+}
+
+% ============================================================================
+% External Segmentation Models
+% ============================================================================
+
+\umlclass[x=-24, y=-14]{EdgeTAMSegmenter}{
+  \{external\} \\
+  - model : SAM2Base \\
+  - device : str
+}{
+  + \_\_init\_\_(config\_path, weights\_path, device) \\
+  + segment(image) : ndarray \\
+  + preprocess(image) : Tensor \\
+  + postprocess(output) : ndarray
+}
+
+% ============================================================================
+% Exception Classes
+% ============================================================================
+
+\umlclass[x=12, y=6]{VisionDetectionError}{
+  \{abstract\} \\
+  + message : str \\
+  + details : Any
+}{
+  + \_\_init\_\_(message, details) \\
+  + \_\_str\_\_() : str
+}
+
+\umlclass[x=0, y=10]{ModelLoadError}{
+  + model\_name : str \\
+  + reason : str
+}{
+  + \_\_init\_\_(model\_name, reason, details)
+}
+
+\umlclass[x=8, y=10]{DetectionError}{
+  + image\_shape : tuple \\
+  + model\_name : str
+}{
+  + \_\_init\_\_(message, image\_shape, model\_name)
+}
+
+\umlclass[x=16, y=10]{SegmentationError}{
+  + bbox : tuple \\
+  + segmentation\_model : str
+}{
+  + \_\_init\_\_(message, bbox, seg\_model)
+}
+
+\umlclass[x=24, y=10]{RedisConnectionError}{
+  + operation : str \\
+  + host : str \\
+  + port : int \\
+  + original\_error : Exception
+}{
+  + \_\_init\_\_(operation, host, port, error)
+}
+
+\umlclass[x=2, y=6]{ImageProcessingError}{
+  + operation : str \\
+  + image\_info : dict \\
+  + original\_error : Exception
+}{
+  + \_\_init\_\_(operation, image\_info, error)
+}
+
+\umlclass[x=12, y=2]{ConfigurationError}{
+  + parameter : str \\
+  + value : Any \\
+  + reason : str
+}{
+  + \_\_init\_\_(parameter, value, reason)
+}
+
+\umlclass[x=22, y=6]{DependencyError}{
+  + dependency : str \\
+  + operation : str \\
+  + suggestion : str
+}{
+  + \_\_init\_\_(dependency, operation, suggestion)
+}
+
+% ============================================================================
+% External Package Classes
+% ============================================================================
+
+\umlclass[x=0, y=-14]{RedisImageStreamer}{
+  \{external: redis\_robot\_comm\}
+}{
+  + get\_latest\_image() : Tuple \\
+  + publish\_image(image, metadata)
+}
+
+\umlclass[x=-24, y=9]{RedisMessageBroker}{
+  \{external: redis\_robot\_comm\}
+}{
+  + publish\_objects(objects, metadata)
+}
+
+% ============================================================================
+% Relationships
+% ============================================================================
+
+% Composition - VisualCortex
+\umlcompo[mult1=1, mult2=1, pos1=0.2, pos2=0.8]{VisualCortex}{ObjectDetector}
+\umlcompo[mult1=1, mult2=1, pos1=0.15, pos2=0.85]{VisualCortex}{VisionConfig}
+
+% Composition - ObjectDetector
+\umlcompo[mult1=1, mult2=1, pos1=0.8, pos2=0.2]{ObjectDetector}{ObjectSegmenter}
+\umlcompo[mult1=1, mult2=1, pos1=0.2, pos2=0.8]{ObjectDetector}{ObjectTracker}
+\umlcompo[mult1=1, mult2=1, pos1=0.95, pos2=0.05]{ObjectDetector}{VisionConfig}
+
+% Composition - VisionConfig
+\umlcompo[mult1=1, mult2=1, pos1=0.8, pos2=0.2]{VisionConfig}{ModelConfig}
+\umlcompo[mult1=1, mult2=1, pos1=0.2, pos2=0.8]{VisionConfig}{RedisConfig}
+\umlcompo[mult1=1, mult2=1, pos1=0.2, pos2=0.8]{VisionConfig}{AnnotationConfig}
+
+% Associations - VisualCortex
+\umluniassoc[mult1=1, mult2=1, pos1=0.85, pos2=0.15]{VisualCortex}{RedisImageStreamer}
+
+% Associations - ObjectDetector
+\umluniassoc[mult1=1, mult2=1, pos1=0.85, pos2=0.15]{ObjectDetector}{RedisMessageBroker}
+
+% Dependencies - ObjectSegmenter
+\umldep[geometry=--, arg=uses]{ObjectSegmenter}{EdgeTAMSegmenter}
+
+% Inheritance - Exception Classes
+\umlinherit{ModelLoadError}{VisionDetectionError}
+\umlinherit{DetectionError}{VisionDetectionError}
+\umlinherit{SegmentationError}{VisionDetectionError}
+\umlinherit{RedisConnectionError}{VisionDetectionError}
+\umlinherit{ImageProcessingError}{VisionDetectionError}
+\umlinherit{ConfigurationError}{VisionDetectionError}
+\umlinherit{DependencyError}{VisionDetectionError}
+
+\end{tikzpicture}
+
+\end{document}

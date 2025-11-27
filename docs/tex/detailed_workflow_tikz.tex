@@ -1,0 +1,143 @@
+\documentclass[border=10pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows.meta,positioning,shadows,fit,backgrounds}
+
+\begin{document}
+
+\tikzset{
+  package/.style={
+    rectangle,
+    draw=black,
+    very thick,
+    fill=blue!10,
+    text width=6cm,
+    minimum height=12cm,
+    rounded corners=5pt,
+    drop shadow
+  },
+  component/.style={
+    rectangle,
+    draw,
+    fill=green!20,
+    text width=2.2cm,
+    text centered,
+    minimum height=0.8cm,
+    rounded corners=3pt,
+    font=\small
+  },
+  subcomponent/.style={
+    rectangle,
+    draw,
+    fill=yellow!20,
+    text width=2cm,
+    text centered,
+    minimum height=0.6cm,
+    rounded corners=2pt,
+    font=\footnotesize
+  },
+  data/.style={
+    cylinder,
+    draw,
+    fill=red!20,
+    text width=2.5cm,
+    text centered,
+    minimum height=0.8cm,
+    shape border rotate=90,
+    aspect=0.25,
+    font=\small
+  },
+  arrow/.style={
+    ->,
+    >=Stealth,
+    thick
+  },
+  dataarrow/.style={
+    ->,
+    >=Stealth,
+    thick,
+    dashed,
+    color=blue
+  }
+}
+
+\begin{tikzpicture}[node distance=1.2cm and 2.5cm]
+
+  % Redis Robot Comm Package
+  \node[package] (redis_package) at (0,0) {};
+  \node[above=0.2cm of redis_package.north, font=\large\bfseries] {redis\_robot\_comm};
+
+  \node[component] (imagestreamer) at (redis_package.center) [yshift=4.5cm] {Redis\\ImageStreamer};
+  \node[data] (redis_images) at (redis_package.center) [yshift=2.0cm] {Redis Stream\\robot\_camera};
+  \node[component] (messagebroker) at (redis_package.center) [yshift=-0.75cm] {Redis\\MessageBroker};
+  \node[data] (redis_objects) at (redis_package.center) [yshift=-3.5cm] {Redis Stream\\detected\_objects};
+
+  % Vision Detect Segment Package
+  \node[package, right=3cm of redis_package] (vision_package) {};
+  \node[above=0.2cm of vision_package.north, font=\large\bfseries] {vision\_detect\_segment};
+
+  \node[component] (visualcortex) at (vision_package.center) [yshift=4.5cm] {VisualCortex};
+  \node[subcomponent] (detector) at (vision_package.center) [yshift=2.0cm] {ObjectDetector};
+  \node[subcomponent] (tracker) at (vision_package.center) [yshift=0.4cm] {ObjectTracker};
+  \node[subcomponent] (segmenter) at (vision_package.center) [yshift=-1.2cm] {ObjectSegmenter};
+  \node[component] (config) at (vision_package.center) [yshift=-4cm, xshift=1.5cm] {VisionConfig};
+
+  % External Components
+  \node[component, left=2.5cm of imagestreamer] (camera) {Image Source\\Camera/File};
+  \node[component, below=3cm of redis_objects] (consumer) {Downstream\\Application};
+
+  % Data Flow Arrows
+
+  % Step 1: Image Publishing
+  \draw[arrow] (camera) -- node[above, font=\scriptsize] {cv2.imread()} (imagestreamer);
+  \draw[arrow] (imagestreamer) -- node[right, font=\scriptsize] {publish\_image()} (redis_images);
+  \draw[dataarrow] (camera) to[bend right=20] node[left, font=\tiny] {metadata} (redis_images);
+
+  % Step 2: Image Retrieval
+  \draw[arrow] (redis_images) -- node[above, font=\scriptsize] {get\_latest\_image()} (visualcortex.west);
+  \draw[dataarrow] (redis_images) to[bend left=25] node[above, font=\tiny, sloped] {image + metadata} (visualcortex.north);
+
+  % Step 3: Detection Pipeline
+  \draw[arrow] (visualcortex) -- node[right, font=\scriptsize] {detect\_objects()} (detector);
+  \draw[arrow] (detector) -- node[right, font=\scriptsize] {track()} (tracker);
+  \draw[arrow] (tracker) -- node[right, font=\scriptsize] {segment()} (segmenter);
+
+  % Step 4: Configuration
+  \draw[dataarrow] (config) to[bend right=35] (visualcortex.east);
+  \draw[dataarrow] (config) to[bend right=30] (detector.east);
+
+  % Step 5: Results Flow
+  \draw[arrow] (segmenter.west) to[bend left=40] node[left, font=\scriptsize] {results} (visualcortex);
+  \draw[arrow] (visualcortex) -- node[above, font=\scriptsize] {publish\_objects()} (messagebroker.east);
+  \draw[arrow] (messagebroker) -- node[right, font=\scriptsize] {xadd()} (redis_objects);
+
+  % Step 6: Consumer
+  \draw[arrow] (redis_objects) -- node[left, font=\scriptsize] {get\_latest\_objects()} (consumer);
+
+  % Annotations for data content
+  \node[font=\tiny, text width=2cm, below left=0.05cm of redis_images] (img_content) {
+    \textbf{Image Data:}\\
+    • base64 JPEG\\
+    • width/height\\
+    • metadata\\
+    • timestamp
+  };
+
+  \node[font=\tiny, text width=2.3cm, below right=0.05cm of redis_objects] (obj_content) {
+    \textbf{Detections:}\\
+    • label, confidence\\
+    • bbox coordinates\\
+    • track\_id (optional)\\
+    • mask (optional)
+  };
+
+  % Step numbers
+  \node[circle, draw, fill=white, font=\tiny\bfseries, minimum size=0.5cm] at (camera.east) [xshift=1.2cm, yshift=-0.4cm] {1};
+  \node[circle, draw, fill=white, font=\tiny\bfseries, minimum size=0.5cm] at (redis_images.east) [xshift=2.8cm, yshift=0.9cm] {2};
+  \node[circle, draw, fill=white, font=\tiny\bfseries, minimum size=0.5cm] at (visualcortex.south) [xshift=-0.4cm, yshift=-0.8cm] {3};
+  \node[circle, draw, fill=white, font=\tiny\bfseries, minimum size=0.5cm] at (segmenter.east) [xshift=0.5cm] {4};
+  \node[circle, draw, fill=white, font=\tiny\bfseries, minimum size=0.5cm] at (messagebroker.south) [xshift=-0.4cm, yshift=-0.5cm] {5};
+  \node[circle, draw, fill=white, font=\tiny\bfseries, minimum size=0.5cm] at (consumer.west) [xshift=-0.5cm] {6};
+
+\end{tikzpicture}
+
+\end{document}

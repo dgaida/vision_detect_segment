@@ -1,0 +1,92 @@
+\documentclass[border=10pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning,shadows,fit}
+
+\begin{document}
+
+\tikzset{
+  component/.style={
+    rectangle,
+    draw,
+    fill=blue!20,
+    text width=3cm,
+    text centered,
+    minimum height=1.5cm,
+    rounded corners,
+    drop shadow
+  },
+  process/.style={
+    rectangle,
+    draw,
+    fill=green!20,
+    text width=2.5cm,
+    text centered,
+    minimum height=1cm,
+    rounded corners
+  },
+  data/.style={
+    cylinder,
+    draw,
+    fill=orange!20,
+    text width=2cm,
+    text centered,
+    minimum height=1cm,
+    shape border rotate=90,
+    aspect=0.25
+  },
+  arrow/.style={
+    ->,
+    >=stealth,
+    thick
+  },
+  label/.style={
+    font=\small,
+    text width=3.0cm,
+    text centered
+  }
+}
+
+\begin{tikzpicture}[node distance=3cm and 3.75cm]
+
+  % Components
+  \node[component] (imagesource) {Image Source\\(Camera/File)};
+  \node[data, right=of imagesource] (redis) {Redis Server\\(Streams)};
+  \node[component, right=of redis] (visualcortex) {VisualCortex};
+
+  % Sub-processes
+  \node[process, below right=1.5cm of visualcortex] (detector) {ObjectDetector};
+  \node[process, below=1.0cm of detector] (tracker) {ObjectTracker};
+  \node[process, below=1.0cm of tracker] (segmenter) {ObjectSegmenter};
+
+  % Output
+  \node[component, below=1cm of redis] (results) {Detection Results\\(Redis)};
+  \node[component, below=1cm of imagesource] (consumer) {Downstream\\Consumer};
+
+  % Arrows and labels - Image Publishing
+  \draw[arrow] (imagesource) -- node[above, label] {1. Publish Image\\RedisImageStreamer} (redis);
+
+  % Arrows - Image Retrieval
+  \draw[arrow] (redis) -- node[above, label] {2. Get Latest Image} (visualcortex);
+
+  % Arrows - Processing Pipeline
+  \draw[arrow] (visualcortex) -- node[right, label] {3. Detect Objects} (detector);
+  \draw[arrow] (detector) -- node[right, label] {4. Track Objects\\(Optional)} (tracker);
+  \draw[arrow] (tracker) -- node[right, label] {5. Segment Objects\\(Optional)} (segmenter);
+
+  % Arrows - Results Publishing
+  % TODO - Kante genauer positionieren
+  \draw[arrow] (segmenter) -| node[near start, left, below] {6. Return} (visualcortex);
+  \draw[arrow] (visualcortex) |- node[near end, above, label] {7. Publish Detections\\RedisMessageBroker} (results);
+
+  % Arrows - Metadata flow
+  \draw[arrow, dashed] (imagesource) -- node[below, label, font=\scriptsize] {Metadata:\\pose, workspace} (redis);
+
+  % Arrows - Consumer
+  \draw[arrow] (results) -- node[above, label] {8. Consume Results} (consumer);
+
+  % Group boxes
+  \node[draw, dashed, fit=(detector) (tracker) (segmenter), label=below:Vision Processing Pipeline, inner sep=0.3cm] {};
+
+\end{tikzpicture}
+
+\end{document}
