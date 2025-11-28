@@ -207,8 +207,9 @@ class TestTrackingEdgeCases:
         labels_2 = ["cat"]
         tracker.update_label_history(track_ids_2, labels_2)
 
-        # Frame 3: Object left (empty frame)
-        lost = tracker.detect_lost_tracks(np.array([]))
+        # Frame 3: Object left (empty frame) - track ID 1 is missing
+        track_ids_3 = np.array([])  # Empty array - no tracks present
+        lost = tracker.detect_lost_tracks(track_ids_3)
         assert 1 in lost
 
         # Frame 4: New object enters with same ID

@@ -235,13 +235,16 @@ class TestYOLOIntegration:
         mock_result.boxes.id = np.array([1, 2])
         mock_result.names = {0: "object1", 1: "object2"}
 
+        # Mock the tracker's track method
+        detector._tracker.track = Mock(return_value=[mock_result])
+
+        # Also need to mock the model's track method which is actually called
         detector._model.track = Mock(return_value=[mock_result])
 
-        with patch.object(detector._tracker, "track", return_value=[mock_result]):
-            results = detector.detect_objects(image)
+        results = detector.detect_objects(image)
 
-            assert len(results) == 2
-            assert "track_id" in results[0]
+        assert len(results) == 2
+        assert "track_id" in results[0]
 
     def test_yolo_label_update(self, yolo_detector):
         """Test updating YOLO model labels."""
@@ -301,7 +304,7 @@ class TestTransformerModelIntegration:
         mock_outputs = Mock()
         detector._model.return_value = mock_outputs
 
-        # Mock post-processing
+        # Mock post-processing - returns a list with one result dict
         mock_results = {
             "boxes": torch.tensor([[10.0, 20.0, 100.0, 200.0]]),
             "scores": torch.tensor([0.95]),
@@ -309,6 +312,7 @@ class TestTransformerModelIntegration:
         }
         detector._processor.post_process_object_detection = Mock(return_value=[mock_results])
 
+        # Mock label extraction
         with patch.object(detector, "_extract_owlv2_labels", return_value=np.array(["cat"])):
             results = detector.detect_objects(image)
 

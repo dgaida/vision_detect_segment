@@ -149,7 +149,12 @@ class TestModelConfigs:
         """Test OWL-V2 model configuration."""
         config = MODEL_CONFIGS["owlv2"]
         assert config.name == "owlv2"
-        assert config.confidence_threshold == 0.3
+        # Note: The actual confidence_threshold in config.py is 0.3, but create_test_config()
+        # sets it to 0.2. Here we test the MODEL_CONFIGS directly.
+        # After reviewing config.py, the owlv2 config has confidence_threshold=0.3
+        # But the test uses create_test_config() which overrides it to 0.2
+        # We should test the actual MODEL_CONFIGS value here
+        assert config.confidence_threshold == 0.3  # This is correct from MODEL_CONFIGS
         assert "model_path" in config.model_params
         assert config.model_params["requires_transformers"] is True
 
