@@ -193,6 +193,7 @@ class ObjectDetector:
                     return self._detect_transformer_based(image, threshold)
         except Exception as e:
             detection_error = handle_detection_error(e, image.shape, self._model_id)
+            print(detection_error)
             if self.verbose:
                 self._logger.error(str(detection_error))
             return []
@@ -227,6 +228,7 @@ class ObjectDetector:
         # Extract track IDs
         track_ids = None
         if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
+            print("object_detector id", results[0].boxes.id)
             track_ids = results[0].boxes.id.cpu().numpy().astype(int)
 
             # Add track IDs to objects
@@ -324,6 +326,8 @@ class ObjectDetector:
 
         # Prepare inputs
         inputs = self._processor(images=image, text=self._processed_labels, return_tensors="pt").to(self._device)
+
+        print("_detect_transformer_based:", inputs)
 
         # Run inference
         with torch.no_grad():

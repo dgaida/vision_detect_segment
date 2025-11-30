@@ -6,6 +6,7 @@ Contains all configurable parameters and default values.
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import torch
+import copy
 
 
 @dataclass
@@ -268,6 +269,27 @@ MODEL_CONFIGS = {
 }
 
 
+def get_model_config(model_name: str) -> ModelConfig:
+    """
+    Get a deep copy of a model configuration to prevent mutation issues.
+
+    Args:
+        model_name: Name of the model configuration to retrieve
+
+    Returns:
+        ModelConfig: A deep copy of the model configuration
+
+    Raises:
+        ValueError: If model_name is not found in MODEL_CONFIGS
+    """
+    if model_name not in MODEL_CONFIGS:
+        available = list(MODEL_CONFIGS.keys())
+        raise ValueError(f"Unknown model '{model_name}'. Available: {available}")
+
+    # Return a deep copy to prevent mutations affecting the original
+    return copy.deepcopy(MODEL_CONFIGS[model_name])
+
+
 def get_default_config(model_name: str = "owlv2") -> VisionConfig:
     """
     Get a default configuration for the specified model.
@@ -285,7 +307,8 @@ def get_default_config(model_name: str = "owlv2") -> VisionConfig:
         raise ValueError(f"Unsupported model: {model_name}. " f"Available models: {list(MODEL_CONFIGS.keys())}")
 
     config = VisionConfig()
-    config.model = MODEL_CONFIGS[model_name]
+    # Use copy.deepcopy to prevent mutations
+    config.model = copy.deepcopy(MODEL_CONFIGS[model_name])
     return config
 
 

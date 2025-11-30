@@ -170,7 +170,7 @@ class ObjectTracker:
         Returns:
             List of track IDs that were lost
         """
-        if current_track_ids is None or len(current_track_ids) == 0:
+        if current_track_ids is None:  # or len(current_track_ids) == 0:
             return []
 
         current_ids = set(int(tid) for tid in current_track_ids)

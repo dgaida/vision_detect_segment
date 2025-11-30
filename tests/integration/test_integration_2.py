@@ -197,6 +197,22 @@ class TestLabelManagementIntegration:
         assert stabilized_results[-1] == "cat"
 
 
+def create_boxes():
+    box1 = Mock()
+    box1.cls = 0
+    box1.conf = 0.9
+    box1.xyxy = torch.tensor([[10, 20, 100, 200]])
+    box1.id = 1
+
+    box2 = Mock()
+    box2.cls = 1
+    box2.conf = 0.85
+    box2.xyxy = torch.tensor([[150, 50, 250, 150]])
+    box2.id = 2
+
+    return box1, box2
+
+
 class TestYOLOIntegration:
     """Test YOLO-specific integration scenarios."""
 
@@ -226,9 +242,12 @@ class TestYOLOIntegration:
         detector = yolo_detector
         image = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
 
+        box1, box2 = create_boxes()
+
         # Mock YOLO results with tracking
         mock_result = Mock()
         mock_result.boxes = Mock()
+        mock_result.boxes.__iter__ = Mock(return_value=iter([box1, box2]))
         mock_result.boxes.cls = np.array([0, 1])
         mock_result.boxes.conf = np.array([0.9, 0.85])
         mock_result.boxes.xyxy = torch.tensor([[10, 20, 100, 200], [150, 50, 250, 150]])
@@ -240,6 +259,9 @@ class TestYOLOIntegration:
 
         # Also need to mock the model's track method which is actually called
         detector._model.track = Mock(return_value=[mock_result])
+
+        # Mock predict as fallback (in case tracking is disabled)
+        detector._model.predict = Mock(return_value=[mock_result])
 
         results = detector.detect_objects(image)
 

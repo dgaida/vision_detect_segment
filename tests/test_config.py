@@ -10,6 +10,7 @@ from vision_detect_segment.utils.config import (
     AnnotationConfig,
     get_default_config,
     create_test_config,
+    get_model_config,
     MODEL_CONFIGS,
 )
 
@@ -145,9 +146,10 @@ class TestModelConfigs:
         for model_name in expected_models:
             assert model_name in MODEL_CONFIGS
 
+    # TODO: if I only call pytest tests\test_config.py the test passes, but if all tests are executed this test fails
     def test_owlv2_config(self):
         """Test OWL-V2 model configuration."""
-        config = MODEL_CONFIGS["owlv2"]
+        config = get_model_config("owlv2")
         assert config.name == "owlv2"
         # Note: The actual confidence_threshold in config.py is 0.3, but create_test_config()
         # sets it to 0.2. Here we test the MODEL_CONFIGS directly.
@@ -160,7 +162,7 @@ class TestModelConfigs:
 
     def test_yolo_world_config(self):
         """Test YOLO-World model configuration."""
-        config = MODEL_CONFIGS["yolo-world"]
+        config = get_model_config("yolo-world")
         assert config.name == "yolo-world"
         assert config.confidence_threshold == 0.25
         assert "model_path" in config.model_params
@@ -168,7 +170,7 @@ class TestModelConfigs:
 
     def test_grounding_dino_config(self):
         """Test Grounding-DINO model configuration."""
-        config = MODEL_CONFIGS["grounding_dino"]
+        config = get_model_config("grounding_dino")
         assert config.name == "grounding_dino"
         assert "model_path" in config.model_params
         assert config.model_params["requires_transformers"] is True

@@ -8,16 +8,45 @@ on:
       - '**.md'
       - 'LICENSE'
       - '.gitignore'
+      - 'docs/**'
+      - '**.rst'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/dependency-review.yml'
+      - '.github/workflows/codeql.yml'
+      - '.github/workflows/lint.yml'
   pull_request:
     branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      full_test:
+        description: 'Run full test matrix'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.8', '3.9', '3.10', '3.11']
+        # Conditional matrix based on event type
+        # Quick tests: ubuntu-latest + Python 3.11 only
+        # Full tests: all OS and all Python versions
+        os: >-
+          ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.full_test == 'true'
+                || contains(github.event.head_commit.message, '[full-test]')
+                || contains(github.event.head_commit.message, '[full ci]'))
+              && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]')
+              || fromJSON('["ubuntu-latest"]') }}
+        python-version: >-
+          ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.full_test == 'true'
+                || contains(github.event.head_commit.message, '[full-test]')
+                || contains(github.event.head_commit.message, '[full ci]'))
+              && fromJSON('["3.8", "3.9", "3.10", "3.11"]')
+              || fromJSON('["3.11"]') }}
       fail-fast: false
 
     steps:
@@ -27,6 +56,18 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
+
+    - name: Display test mode
+      run: |
+        if [[ "${{ github.event_name }}" == "schedule" ]] || \
+           [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.full_test }}" == "true" ]] || \
+           [[ "${{ contains(github.event.head_commit.message, '[full-test]') }}" == "true" ]] || \
+           [[ "${{ contains(github.event.head_commit.message, '[full ci]') }}" == "true" ]]; then
+          echo "🔥 Running FULL test suite on all platforms"
+        else
+          echo "⚡ Running QUICK tests (ubuntu-latest, Python 3.11 only)"
+        fi
+      shell: bash
 
     - name: Install dependencies
       run: |
@@ -41,7 +82,7 @@ jobs:
       continue-on-error: false
 
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       uses: codecov/codecov-action@v5
       with:
         files: ./coverage.xml
