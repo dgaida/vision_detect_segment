@@ -327,7 +327,7 @@ class ObjectDetector:
         # Prepare inputs
         inputs = self._processor(images=image, text=self._processed_labels, return_tensors="pt").to(self._device)
 
-        print("_detect_transformer_based:", inputs)
+        # print("_detect_transformer_based:", inputs)
 
         # Run inference
         with torch.no_grad():
