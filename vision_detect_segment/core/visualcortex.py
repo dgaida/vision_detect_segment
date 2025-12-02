@@ -105,11 +105,14 @@ class VisualCortex:
         # Publish initial labels
         self._publish_current_labels()
 
+        if verbose:
+            self._logger.info("Published initial detectable labels to Redis")
+
         # Start label monitoring thread
         self._label_monitor_thread = None
         self._label_monitor_stop = threading.Event()
-        if config and hasattr(config, "enable_label_monitoring") and config.enable_label_monitoring:
-            self._start_label_monitoring()
+        # if config and hasattr(config, "enable_label_monitoring") and config.enable_label_monitoring:
+        self._start_label_monitoring()
 
     def _initialize_redis_streamer(self):
         """Initialize Redis image streamer for input images."""
