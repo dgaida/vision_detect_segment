@@ -496,6 +496,8 @@ class VisualCortex:
         try:
             object_labels = self._config.get_object_labels()
 
+            print(object_labels)
+
             if object_labels and len(object_labels) > 0:
                 # Flatten nested list structure
                 labels_flat = object_labels[0] if isinstance(object_labels[0], list) else object_labels
@@ -510,10 +512,12 @@ class VisualCortex:
 
                 if self.verbose:
                     self._logger.info(f"Published {len(labels_flat)} labels to Redis")
+                print(f"Published {len(labels_flat)} labels to Redis")
 
         except Exception as e:
             if self.verbose:
                 self._logger.error(f"Failed to publish labels: {e}")
+            print(f"Failed to publish labels: {e}")
 
     def _start_label_monitoring(self):
         """

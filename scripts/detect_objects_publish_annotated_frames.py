@@ -28,7 +28,7 @@ def main():
         stream_name="robot_camera",
         annotated_stream_name="annotated_camera",
         publish_annotated=True,
-        verbose=True,
+        verbose=False,
         config=config,
     )
 
@@ -47,7 +47,7 @@ def main():
 
             if success:
                 frame_count += 1
-                if frame_count % 10 == 0:
+                if frame_count % 20 == 0:
                     detected = visual_cortex.get_detected_objects()
                     print(f"Processed {frame_count} frames, " f"current detections: {len(detected)}")
 
