@@ -4,6 +4,8 @@ import torch
 import supervision as sv
 import cv2
 import copy
+import threading
+import time
 
 from .object_detector import ObjectDetector
 from ..utils.config import VisionConfig, get_default_config
@@ -19,6 +21,7 @@ from ..utils.utils import (
 )
 
 from redis_robot_comm import RedisImageStreamer
+from redis_robot_comm import RedisLabelManager
 
 
 class VisualCortex:
@@ -95,6 +98,18 @@ class VisualCortex:
             error_msg = f"VisualCortex initialization failed: {e}"
             self._logger.error(error_msg)
             raise DetectionError(error_msg)
+
+        # Add label manager for publishing detectable objects
+        self._label_manager = RedisLabelManager()
+
+        # Publish initial labels
+        self._publish_current_labels()
+
+        # Start label monitoring thread
+        self._label_monitor_thread = None
+        self._label_monitor_stop = threading.Event()
+        if config and hasattr(config, "enable_label_monitoring") and config.enable_label_monitoring:
+            self._start_label_monitoring()
 
     def _initialize_redis_streamer(self):
         """Initialize Redis image streamer for input images."""
@@ -284,9 +299,18 @@ class VisualCortex:
                 self._logger.warning(f"Failed to publish annotated frame: {redis_error}")
 
     def add_detectable_object(self, object_name: str):
-        """Add a new object type to the detectable objects list."""
+        """
+        Add a new object type to the detectable objects list and publish to Redis.
+
+        Args:
+            object_name: Name of the object to add
+        """
         if self._object_detector:
             self._object_detector.add_label(object_name)
+
+            # Publish updated labels to Redis
+            self._publish_current_labels()
+
             if self.verbose:
                 self._logger.info(f"Added new detectable object: {object_name}")
 
@@ -461,12 +485,123 @@ class VisualCortex:
                 self._logger.warning(f"Detection scaling failed: {e}")
             return detections
 
+    def _publish_current_labels(self):
+        """
+        Publish current detectable object labels to Redis.
+        Should be called on initialization and whenever labels change.
+        """
+        try:
+            object_labels = self._config.get_object_labels()
+
+            if object_labels and len(object_labels) > 0:
+                # Flatten nested list structure
+                labels_flat = object_labels[0] if isinstance(object_labels[0], list) else object_labels
+
+                metadata = {
+                    "model_id": self._objdetect_model_id,
+                    "source": "vision_detect_segment",
+                    "label_count": len(labels_flat),
+                }
+
+                self._label_manager.publish_labels(labels_flat, metadata)
+
+                if self.verbose:
+                    self._logger.info(f"Published {len(labels_flat)} labels to Redis")
+
+        except Exception as e:
+            if self.verbose:
+                self._logger.error(f"Failed to publish labels: {e}")
+
+    def _start_label_monitoring(self):
+        """
+        Start a background thread that monitors Redis for label updates
+        and updates the object detector accordingly.
+        """
+
+        def monitor_labels():
+            """Background thread function to check for label updates."""
+            if self.verbose:
+                self._logger.info("Starting label monitoring thread")
+
+            last_check_time = time.time()
+            check_interval = 1.0  # Check every second
+
+            while not self._label_monitor_stop.is_set():
+                try:
+                    current_time = time.time()
+
+                    # Only check periodically
+                    if current_time - last_check_time >= check_interval:
+                        # Get latest labels from Redis
+                        new_labels = self._label_manager.get_latest_labels(timeout_seconds=5.0)
+
+                        if new_labels is not None:
+                            # Get current labels
+                            current_labels = self.get_object_labels()
+                            current_labels_flat = current_labels[0] if current_labels else []
+
+                            # Check if labels have changed
+                            if set(new_labels) != set(current_labels_flat):
+                                if self.verbose:
+                                    self._logger.info("Label update detected, updating detector")
+
+                                # Update detector with new labels
+                                self._update_detector_labels(new_labels)
+
+                        last_check_time = current_time
+
+                    # Sleep briefly to avoid busy waiting
+                    time.sleep(0.1)
+
+                except Exception as e:
+                    if self.verbose:
+                        self._logger.error(f"Error in label monitoring: {e}")
+                    time.sleep(1.0)  # Wait longer on error
+
+            if self.verbose:
+                self._logger.info("Label monitoring thread stopped")
+
+        self._label_monitor_thread = threading.Thread(target=monitor_labels, daemon=True)
+        self._label_monitor_thread.start()
+
+    def _update_detector_labels(self, new_labels: list):
+        """
+        Update the object detector with new labels.
+
+        Args:
+            new_labels: List of new label strings
+        """
+        try:
+            # Update config
+            self._config.set_object_labels(new_labels)
+
+            # Update detector
+            if self._object_detector:
+                # Clear existing labels and add new ones
+                for label in new_labels:
+                    self._object_detector.add_label(label)
+
+                if self.verbose:
+                    self._logger.info(f"Updated detector with {len(new_labels)} labels")
+
+        except Exception as e:
+            if self.verbose:
+                self._logger.error(f"Failed to update detector labels: {e}")
+
     # Utility methods
     def clear_cache(self):
         """Clear GPU cache and reset internal state."""
         clear_gpu_cache()
         if self.verbose:
             self._logger.info("GPU cache cleared")
+
+    def cleanup(self):
+        """
+        Cleanup method to stop background threads.
+        """
+        if self._label_monitor_thread:
+            self._label_monitor_stop.set()
+            self._label_monitor_thread.join(timeout=2.0)
 
     def get_memory_usage(self) -> Dict[str, Any]:
         """Get current memory usage information."""
