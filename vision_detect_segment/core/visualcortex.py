@@ -34,6 +34,8 @@ class VisualCortex:
         objdetect_model_id: str,
         device: str = "auto",
         stream_name: str = "robot_camera",
+        annotated_stream_name: str = "annotated_camera",
+        publish_annotated: bool = True,
         verbose: bool = False,
         config: Optional[VisionConfig] = None,
     ):
@@ -43,7 +45,9 @@ class VisualCortex:
         Args:
             objdetect_model_id: Identifier for the object detection model
             device: Device to use ("auto", "cuda", "cpu")
-            stream_name: Redis stream name for image data
+            stream_name: Redis stream name for input image data
+            annotated_stream_name: Redis stream name for annotated images
+            publish_annotated: Whether to publish annotated images to Redis
             verbose: Enable verbose logging
             config: Optional VisionConfig instance
         """
@@ -51,6 +55,8 @@ class VisualCortex:
         self._objdetect_model_id = objdetect_model_id
         self._device = get_optimal_device(prefer_gpu=(device != "cpu"))
         self._stream_name = stream_name
+        self._annotated_stream_name = annotated_stream_name
+        self._publish_annotated = publish_annotated
         self._img_work = None
         self._annotated_frame = None
         self._detected_objects = []
@@ -60,6 +66,7 @@ class VisualCortex:
         self._halo_annotator = None
         self._object_detector = None
         self._streamer = None
+        self._annotated_streamer = None
 
         # Public configuration
         self.verbose = verbose
@@ -77,6 +84,7 @@ class VisualCortex:
             # Initialize components
             with Timer("Initializing VisualCortex", self._logger if verbose else None):
                 self._initialize_redis_streamer()
+                self._initialize_annotated_streamer()
                 self._setup_annotators()
                 self._initialize_object_detector()
 
@@ -89,14 +97,32 @@ class VisualCortex:
             raise DetectionError(error_msg)
 
     def _initialize_redis_streamer(self):
-        """Initialize Redis image streamer."""
+        """Initialize Redis image streamer for input images."""
         try:
             self._streamer = RedisImageStreamer(stream_name=self._stream_name)
+            if self.verbose:
+                self._logger.info(f"Initialized input streamer: {self._stream_name}")
         except Exception as e:
             redis_error = handle_redis_error("initialization", self._config.redis.host, self._config.redis.port, e)
             if self.verbose:
                 self._logger.warning(f"Redis streamer initialization failed: {redis_error}")
             self._streamer = None
+
+    def _initialize_annotated_streamer(self):
+        """Initialize Redis image streamer for annotated images."""
+        if not self._publish_annotated:
+            self._annotated_streamer = None
+            return
+
+        try:
+            self._annotated_streamer = RedisImageStreamer(stream_name=self._annotated_stream_name)
+            if self.verbose:
+                self._logger.info(f"Initialized annotated streamer: {self._annotated_stream_name}")
+        except Exception as e:
+            redis_error = handle_redis_error("initialization", self._config.redis.host, self._config.redis.port, e)
+            if self.verbose:
+                self._logger.warning(f"Annotated streamer initialization failed: {redis_error}")
+            self._annotated_streamer = None
 
     def _setup_annotators(self):
         """Initialize supervision library annotators."""
@@ -151,9 +177,6 @@ class VisualCortex:
 
             image, metadata = result
 
-            # Validate image before processing (done again in process_image_callback)
-            # validate_image(image)
-
             self.process_image_callback(image, metadata, None)
             return True
 
@@ -200,6 +223,10 @@ class VisualCortex:
             with Timer("Annotation", self._logger if self.verbose else None):
                 self._create_annotated_frame(detected_objects)
 
+            # Publish annotated frame to Redis
+            if self._publish_annotated and self._annotated_frame is not None:
+                self._publish_annotated_frame(metadata, frame_id)
+
             # Update state
             self._detected_objects = detected_objects
             self._processed_frames += 1
@@ -221,12 +248,61 @@ class VisualCortex:
             if self.verbose:
                 self._logger.error(str(detection_error))
 
+    def _publish_annotated_frame(self, original_metadata: Dict[str, Any], frame_id: int):
+        """
+        Publish annotated frame to Redis.
+
+        Args:
+            original_metadata: Metadata from the original image
+            frame_id: Frame identifier
+        """
+        if self._annotated_streamer is None:
+            return
+
+        try:
+            # Create metadata for annotated frame
+            annotated_metadata = {
+                **original_metadata,
+                "frame_id": frame_id,
+                "annotated": True,
+                "detection_count": len(self._detected_objects),
+                "model_id": self._objdetect_model_id,
+            }
+
+            # Publish to Redis
+            with Timer("Publishing annotated frame", self._logger if self.verbose else None):
+                stream_id = self._annotated_streamer.publish_image(
+                    self._annotated_frame, metadata=annotated_metadata, compress_jpeg=True, quality=85, maxlen=10
+                )
+
+            if self.verbose:
+                self._logger.debug(f"Published annotated frame {frame_id} to Redis: {stream_id}")
+
+        except Exception as e:
+            redis_error = handle_redis_error("publish", self._config.redis.host, self._config.redis.port, e)
+            if self.verbose:
+                self._logger.warning(f"Failed to publish annotated frame: {redis_error}")
+
     def add_detectable_object(self, object_name: str):
         """Add a new object type to the detectable objects list."""
         if self._object_detector:
             self._object_detector.add_label(object_name)
             if self.verbose:
                 self._logger.info(f"Added new detectable object: {object_name}")
+
+    def enable_annotated_publishing(self, enable: bool = True):
+        """
+        Enable or disable publishing of annotated frames to Redis.
+
+        Args:
+            enable: Whether to enable annotated frame publishing
+        """
+        self._publish_annotated = enable
+        if enable and self._annotated_streamer is None:
+            self._initialize_annotated_streamer()
+        if self.verbose:
+            status = "enabled" if enable else "disabled"
+            self._logger.info(f"Annotated frame publishing {status}")
 
     # Properties with proper encapsulation
     def get_current_image(self, resize: bool = True) -> Optional[np.ndarray]:
@@ -274,6 +350,14 @@ class VisualCortex:
     def get_device(self) -> str:
         """Get current computation device."""
         return self._device
+
+    def get_annotated_stream_name(self) -> str:
+        """Get the name of the annotated image stream."""
+        return self._annotated_stream_name
+
+    def is_annotated_publishing_enabled(self) -> bool:
+        """Check if annotated frame publishing is enabled."""
+        return self._publish_annotated and self._annotated_streamer is not None
 
     # Private methods
     def _run_detection(self, image_rgb: np.ndarray) -> List[Dict]:
@@ -404,6 +488,8 @@ class VisualCortex:
             "has_current_image": self._img_work is not None,
             "current_detections_count": len(self._detected_objects),
             "redis_available": self._streamer is not None,
+            "annotated_streamer_available": self._annotated_streamer is not None,
+            "annotated_publishing_enabled": self._publish_annotated,
             "detector_available": self._object_detector is not None,
         }
 
