@@ -914,13 +914,16 @@ streamer.publish_image(image, maxlen=5)  # Keep only last 5 frames
 | Redis publish | <1 ms | Local network |
 | Redis retrieve | <1 ms | Local network |
 | Image decoding | 5-20 ms | Depends on image size |
-| Detection (YOLO) | 20-50 ms | GPU-dependent |
+| Detection (YOLOE) | 6-10 ms | GPU-dependent |
+| Detection (YOLO-World) | 20-50 ms | GPU-dependent |
 | Detection (OWL-V2) | 100-200 ms | GPU-dependent |
+| Segmentation (YOLOE built-in) | Included | Part of detection |
 | Segmentation (FastSAM) | 50-100 ms | Per object |
 | Segmentation (SAM2) | 200-500 ms | Per object |
 | Annotation | 5-10 ms | CPU-bound |
-| **Total (YOLO, no seg)** | **40-100 ms** | ~10-25 FPS |
-| **Total (OWL-V2 + SAM2)** | **500-1000 ms** | ~1-2 FPS |
+| **Total (YOLOE)** | **20-50 ms** | **~20-50 FPS** |
+| **Total (YOLO-World, no seg)** | **40-100 ms** | **~10-25 FPS** |
+| **Total (OWL-V2 + SAM2)** | **500-1000 ms** | **~1-2 FPS** |
 
 ---
 
@@ -957,6 +960,9 @@ cortex.clear_cache()
 
 # Or reduce image size
 image = cv2.resize(image, (640, 480))
+
+# Or use smaller model
+cortex = VisualCortex("yoloe-11s", device="cuda")
 ```
 
 ---
@@ -987,7 +993,8 @@ DependencyError: Missing dependency 'transformers'
 ```bash
 # Install dependencies
 pip install transformers  # For OWL-V2, Grounding-DINO
-pip install ultralytics   # For YOLO-World
+pip install -U ultralytics>=8.3.0   # For YOLO-World, YOLOE
+pip install segment-anything-2  # For SAM2 segmentation (optional)
 ```
 
 ---
@@ -1006,6 +1013,44 @@ detector = ObjectDetector(
 
 # For YOLO, verify persist=True
 results = model.track(image, persist=True)
+```
+
+---
+
+**6. Label Flickering Between Frames**
+```python
+# Labels keep changing: "cat" -> "dog" -> "cat"
+```
+**Solution:**
+```python
+# Use label stabilization (enabled by default)
+tracker = ObjectTracker(
+    model=model,
+    model_id="owlv2",
+    enable_tracking=True,
+    stabilization_frames=10  # Stabilize after 10 frames
+)
+
+# Labels will be locked after stabilization period
+```
+
+---
+
+**7. Segmentation Masks Not Generated**
+```python
+# has_mask: False for all objects
+```
+**Solution:**
+```python
+# Option 1: Use YOLOE with built-in segmentation
+cortex = VisualCortex("yoloe-11l", device="cuda")
+
+# Option 2: Check if segmentation is enabled
+config.enable_segmentation = True
+
+# Option 3: Install segmentation dependencies
+pip install segment-anything-2  # For SAM2
+# or use FastSAM (included with ultralytics)
 ```
 
 ---
@@ -1035,7 +1080,7 @@ with open("config.json", "w") as f:
 
 ### 2. Error Handling
 ```python
-from vision_detect_segment.exceptions import (
+from vision_detect_segment.utils.exceptions import (
     VisionDetectionError,
     RedisConnectionError
 )
@@ -1076,15 +1121,88 @@ cortex = VisualCortex("owlv2", config=config)
 
 ---
 
+### 5. Production Deployment
+
+**Optimize for throughput:**
+```python
+# Use YOLOE for best performance
+config = get_default_config("yoloe-11m")
+config.model.confidence_threshold = 0.5
+config.enable_segmentation = True  # Built-in segmentation
+
+cortex = VisualCortex(
+    objdetect_model_id="yoloe-11m",
+    device="cuda",
+    config=config,
+    publish_annotated=False  # Disable if not needed
+)
+```
+
+**Monitor performance:**
+```python
+# Get processing statistics
+stats = cortex.get_stats()
+print(f"Processed frames: {stats['processed_frames']}")
+print(f"Device: {stats['device']}")
+print(f"Detection count: {stats['current_detections_count']}")
+
+# Monitor memory
+memory = cortex.get_memory_usage()
+print(f"Memory usage: {memory['rss_mb']:.1f} MB")
+```
+
+**Handle errors gracefully:**
+```python
+import time
+
+while True:
+    try:
+        success = cortex.detect_objects_from_redis()
+        if not success:
+            time.sleep(0.1)  # Wait for new images
+            continue
+
+        # Process results
+        objects = cortex.get_detected_objects()
+
+    except KeyboardInterrupt:
+        print("Stopping...")
+        cortex.cleanup()
+        break
+
+    except Exception as e:
+        print(f"Error: {e}")
+        time.sleep(1.0)  # Wait before retrying
+```
+
+---
+
 ## Summary
 
 The `vision_detect_segment` workflow provides a complete pipeline for real-time object detection, tracking, and segmentation:
 
 1. ✅ **Image Capture** - Redis-based streaming with compression
-2. ✅ **Detection** - Multi-model support (YOLO, OWL-V2, Grounding-DINO)
-3. ✅ **Tracking** - Persistent object IDs across frames
-4. ✅ **Segmentation** - Optional instance masks (SAM2, FastSAM)
+2. ✅ **Detection** - Multi-model support (YOLOE, YOLO-World, OWL-V2, Grounding-DINO)
+3. ✅ **Tracking** - Persistent object IDs with progressive label stabilization
+4. ✅ **Segmentation** - YOLOE built-in or external (SAM2, FastSAM)
 5. ✅ **Publishing** - Results back to Redis for downstream processing
 6. ✅ **Visualization** - Annotated images for debugging
 
+**Key Features:**
+- **Progressive Label Stabilization**: Labels shown from frame 1, stabilized after N frames
+- **Unified Detection & Segmentation**: YOLOE provides both in one model
+- **Real-Time Performance**: Up to 160 FPS with YOLOE on GPU
+- **Open Vocabulary**: Detect custom objects without retraining
+- **Flexible Configuration**: Easy to customize for different use cases
+
+**Recommended Configurations:**
+- **Speed-critical (>30 FPS)**: YOLOE-11s/m with built-in segmentation
+- **Balanced (10-25 FPS)**: YOLO-World with FastSAM
+- **High accuracy (<5 FPS)**: OWL-V2 or Grounding-DINO with SAM2
+- **Custom classes**: YOLOE or OWL-V2 with text prompts
+
 The system is designed for robotics applications requiring real-time vision processing with flexible configuration and robust error handling.
+
+---
+
+For questions or issues, please see the [main repository](https://github.com/dgaida/vision_detect_segment).
