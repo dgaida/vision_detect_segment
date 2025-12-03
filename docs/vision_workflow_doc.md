@@ -53,28 +53,25 @@ The vision detection system follows a producer-consumer architecture with Redis 
    - Publishes results back to Redis
 
 3. **ObjectDetector**
-   - Multi-model backend support (OWL-V2, YOLO-World, Grounding-DINO)
+   - Multi-model backend support (OWL-V2, YOLO-World, YOLOE, Grounding-DINO)
    - Real-time object detection
    - Confidence-based filtering
 
 4. **ObjectTracker**
    - Persistent object tracking across frames
+   - Progressive label stabilization
    - Track ID assignment
    - YOLO built-in tracking or ByteTrack for transformer models
 
 5. **ObjectSegmenter**
    - Optional instance segmentation
-   - SAM2 or FastSAM backend
+   - SAM2, FastSAM, or YOLOE built-in segmentation
    - Mask generation for detected objects
 
 6. **RedisMessageBroker** (from `redis_robot_comm`)
    - Publishes detection results
    - Stores object metadata
    - Enables downstream consumers
-
----
-
-![Workflow Detailed](workflow_detailed.png)
 
 ---
 
@@ -193,6 +190,56 @@ detected_objects = self._object_detector.detect_objects(
 
 **Detection Process:**
 
+#### For YOLOE Models (Unified Detection & Segmentation):
+
+YOLOE performs both detection and segmentation in a single forward pass, offering real-time performance with built-in instance segmentation.
+
+```python
+# YOLOE detection with optional tracking
+if self._tracker and self._tracker._use_yolo_tracker:
+    results = self._tracker.track(image, threshold)
+else:
+    results = self._model.predict(image, conf=threshold, max_det=20)
+
+# Extract detections with built-in segmentation
+detected_objects = []
+boxes = results[0].boxes
+
+for i, box in enumerate(boxes):
+    cls = int(boxes.cls[i])
+    class_name = results[0].names[cls]
+    confidence = float(boxes.conf[i])
+    x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+    obj_dict = {
+        "label": class_name,
+        "confidence": confidence,
+        "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
+        "has_mask": False
+    }
+
+    # Add track ID if available
+    if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
+        track_id = int(results[0].boxes.id[i])
+        obj_dict["track_id"] = track_id
+
+    detected_objects.append(obj_dict)
+
+# Extract segmentation masks (YOLOE built-in)
+if hasattr(results[0], "masks") and results[0].masks is not None:
+    masks_data = results[0].masks.data
+
+    for i, obj in enumerate(detected_objects):
+        if i < len(masks_data):
+            mask = masks_data[i].cpu().numpy()
+            mask_8u = (mask * 255).astype(np.uint8)
+
+            obj["mask_data"] = base64.b64encode(mask_8u.tobytes()).decode('utf-8')
+            obj["has_mask"] = True
+            obj["mask_shape"] = list(mask_8u.shape)
+            obj["mask_dtype"] = str(mask_8u.dtype)
+```
+
 #### For Transformer-based Models (OWL-V2, Grounding-DINO):
 
 ```python
@@ -268,10 +315,10 @@ detected_objects = [
 
 ### Step 4: Object Tracking (Optional)
 
-If tracking is enabled, the `ObjectTracker` maintains persistent IDs across frames.
+If tracking is enabled, the `ObjectTracker` maintains persistent IDs across frames with progressive label stabilization.
 
 ```python
-# For YOLO models - built-in tracking
+# For YOLO models (YOLO-World, YOLOE) - built-in tracking
 if self._use_yolo_tracker and self.enable_tracking:
     results = self.model.track(
         image,
@@ -295,26 +342,48 @@ if self._tracker and self.enable_tracking:
     track_ids = tracked_detections.tracker_id
 ```
 
+**Progressive Label Stabilization:**
+
+The tracker includes an advanced label stabilization system:
+
+1. **Initial Frames (Frame 1+)**: Shows majority vote of label history
+2. **Stabilization Phase (Frame 1-10)**: Continuously updates majority label
+3. **Locked Phase (Frame 10+)**: Label locked to most common detection
+
+```python
+# Example label stabilization over 12 frames
+# Track ID: 1
+# Frame 1: "cat" → Display: "cat" (100% from 1 detection)
+# Frame 2: "cat" → Display: "cat" (100% from 2 detections)
+# Frame 3: "dog" → Display: "cat" (67% from 3 detections)
+# Frame 4: "cat" → Display: "cat" (75% from 4 detections)
+# ...
+# Frame 10: "cat" → Display: "cat" (80% from 10 detections) - LOCKED
+# Frame 11: "dog" → Display: "cat" (still locked)
+# Frame 12: "dog" → Display: "cat" (still locked)
+```
+
 **Tracking Benefits:**
 - Consistent object identity across frames
-- Motion trajectory analysis
-- Object persistence through occlusions
-- Improved downstream processing (counting, monitoring, etc.)
+- Prevents label flickering between similar classes
+- Motion trajectory analysis capability
+- Object persistence through brief occlusions
+- Improved downstream processing (counting, monitoring)
 
-**Example with Track IDs:**
+**Example with Track IDs and Stabilized Labels:**
 ```python
 detected_objects = [
     {
-        "label": "red cube",
+        "label": "red cube",        # Stabilized label (locked after 10 frames)
         "confidence": 0.95,
         "bbox": {...},
-        "track_id": 1  # Same ID as previous frame
+        "track_id": 1              # Same ID as previous frames
     },
     {
-        "label": "blue circle",
+        "label": "blue circle",     # New object, majority vote from 3 frames
         "confidence": 0.87,
         "bbox": {...},
-        "track_id": 2  # Newly appeared object
+        "track_id": 2              # Newly appeared object
     }
 ]
 ```
@@ -323,12 +392,45 @@ detected_objects = [
 
 ### Step 5: Instance Segmentation (Optional)
 
-If segmentation is enabled, the `ObjectSegmenter` generates pixel-level masks for each detection.
+If segmentation is enabled, the system generates pixel-level masks for each detection.
+
+#### Option 1: YOLOE Built-in Segmentation (Recommended)
+
+YOLOE models have integrated segmentation that runs simultaneously with detection:
+
+```python
+# Segmentation happens automatically during detection
+results = model.predict(image, conf=threshold)
+
+# Extract masks directly from results
+if hasattr(results[0], "masks") and results[0].masks is not None:
+    masks_data = results[0].masks.data
+
+    for i, obj in enumerate(detected_objects):
+        if i < len(masks_data):
+            mask = masks_data[i].cpu().numpy()
+            mask_8u = (mask * 255).astype(np.uint8)
+
+            obj["mask_data"] = base64.b64encode(mask_8u.tobytes()).decode('utf-8')
+            obj["has_mask"] = True
+            obj["mask_shape"] = list(mask_8u.shape)
+            obj["mask_dtype"] = str(mask_8u.dtype)
+```
+
+**YOLOE Segmentation Features:**
+- ✅ Unified pipeline (no separate segmentation step)
+- ✅ Real-time performance (~100-160 FPS on GPU)
+- ✅ High-quality masks comparable to SAM
+- ✅ Works with both prompted and prompt-free variants
+
+#### Option 2: External Segmentation (SAM2, FastSAM)
+
+For models without built-in segmentation (OWL-V2, YOLO-World, Grounding-DINO):
 
 ```python
 # For each detected object
 for obj, box in zip(detected_objects, boxes):
-    # Generate mask
+    # Generate mask using external segmenter
     mask_8u, mask_binary = segmenter.segment_box_in_image(
         box,
         image
@@ -342,33 +444,15 @@ for obj, box in zip(detected_objects, boxes):
         obj["mask_dtype"] = str(mask_8u.dtype)
 ```
 
-**Segmentation Models:**
+**Segmentation Models Comparison:**
 
-#### SAM2 (Segment Anything Model 2):
-- High-quality segmentation
-- Better boundary precision
-- Slower inference (~200ms per object)
+| Model | Speed | Quality | Use Case |
+|-------|-------|---------|----------|
+| **YOLOE (Built-in)** | ⚡⚡⚡ Fast (~6-10ms) | ⭐⭐⭐ Excellent | Real-time unified detection & segmentation |
+| **FastSAM** | ⚡⚡ Medium (~50-100ms) | ⭐⭐ Good | Fast external segmentation |
+| **SAM2** | ⚡ Slow (~200-500ms) | ⭐⭐⭐ Excellent | High-quality masks when speed not critical |
 
-```python
-segmenter = ObjectSegmenter(
-    segmentation_model="facebook/sam2.1-hiera-tiny",
-    device="cuda"
-)
-```
-
-#### FastSAM:
-- Real-time segmentation
-- Good for time-critical applications
-- Faster inference (~50ms per object)
-
-```python
-segmenter = ObjectSegmenter(
-    segmentation_model=None,  # Auto-selects FastSAM
-    device="cuda"
-)
-```
-
-**Segmented Object:**
+**Example Segmented Object:**
 ```python
 {
     "label": "red cube",
@@ -492,11 +576,14 @@ Handles multi-model object detection.
 
 **Supported Models:**
 
-| Model | Backend | Speed | Use Case |
-|-------|---------|-------|----------|
-| **owlv2** | Transformers | Medium | Open-vocabulary detection |
-| **yolo-world** | Ultralytics | Fast | Real-time applications |
-| **grounding_dino** | Transformers | Slow | Complex text queries |
+| Model | Backend | Speed | Segmentation | Use Case |
+|-------|---------|-------|--------------|----------|
+| **yoloe-11s/m/l** | Ultralytics | ⚡⚡⚡ Fast | Built-in ✅ | Real-time unified detection & segmentation |
+| **yoloe-v8s/m/l** | Ultralytics | ⚡⚡⚡ Fast | Built-in ✅ | YOLOv8-based unified pipeline |
+| **yoloe-*-pf** | Ultralytics | ⚡⚡⚡ Fast | Built-in ✅ | Prompt-free with 1200+ classes |
+| **yolo-world** | Ultralytics | ⚡⚡⚡ Fast | External | Real-time open-vocabulary detection |
+| **owlv2** | Transformers | ⚡⚡ Medium | External | Open-vocabulary with custom classes |
+| **grounding_dino** | Transformers | ⚡ Slow | External | Complex text-guided queries |
 
 **Key Methods:**
 - `detect_objects(image, threshold)` - Run detection
@@ -616,6 +703,52 @@ if success:
 
 ---
 
+### Using YOLOE for Real-Time Performance
+
+```python
+import cv2
+from vision_detect_segment import VisualCortex, get_default_config
+
+# Initialize with YOLOE for real-time unified detection & segmentation
+config = get_default_config("yoloe-11l")
+cortex = VisualCortex(
+    objdetect_model_id="yoloe-11l",
+    device="cuda",
+    config=config
+)
+
+# Open video stream
+cap = cv2.VideoCapture(0)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # Publish frame
+    streamer.publish_image(frame)
+
+    # Detect objects (includes segmentation automatically)
+    if cortex.detect_objects_from_redis():
+        detected_objects = cortex.get_detected_objects()
+
+        # Check if segmentation masks are available
+        for obj in detected_objects:
+            if obj.get('has_mask', False):
+                print(f"Object: {obj['label']}, Has mask: True")
+
+        # Display annotated image with segmentation
+        cv2.imshow("YOLOE Detection", cortex.get_annotated_image())
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+```
+
+---
+
 ### Continuous Processing Loop
 
 ```python
@@ -703,13 +836,16 @@ cap.release()
 
 **1. Model Selection:**
 ```python
-# Fast (30+ FPS on GPU)
+# Fastest - Real-time unified detection & segmentation (100-160 FPS on GPU)
+cortex = VisualCortex("yoloe-11l", device="cuda")
+
+# Fast - Real-time detection (30+ FPS on GPU)
 cortex = VisualCortex("yolo-world", device="cuda")
 
-# Medium (10-15 FPS on GPU)
+# Medium - Open-vocabulary detection (10-15 FPS on GPU)
 cortex = VisualCortex("owlv2", device="cuda")
 
-# Slow (3-5 FPS on GPU)
+# Slow - Complex queries (3-5 FPS on GPU)
 cortex = VisualCortex("grounding_dino", device="cuda")
 ```
 
