@@ -9,7 +9,14 @@ import time
 
 from .object_detector import ObjectDetector
 from ..utils.config import VisionConfig, get_default_config
-from ..utils.exceptions import ImageProcessingError, DetectionError, handle_redis_error, handle_detection_error
+from ..utils.exceptions import (
+    ImageProcessingError,
+    DetectionError,
+    RedisConnectionError,
+    DependencyError,
+    handle_redis_error,
+    handle_detection_error,
+)
 from ..utils.utils import (
     setup_logging,
     get_optimal_device,
@@ -115,27 +122,85 @@ class VisualCortex:
         self._start_label_monitoring()
 
     def _initialize_redis_streamer(self):
-        """Initialize Redis image streamer for input images."""
+        """
+        Initialize Redis image streamer for input images.
+
+        Raises:
+            RedisConnectionError: If Redis connection cannot be established
+                                 and fail_on_redis_error is True in config
+        """
         try:
             self._streamer = RedisImageStreamer(stream_name=self._stream_name)
+
+            # Verify connection by attempting a ping
+            try:
+                # Try to access Redis to verify connection
+                self._streamer._redis_client.ping()
+                if self.verbose:
+                    self._logger.info(f"✓ Initialized input streamer: {self._stream_name}")
+            except Exception as ping_error:
+                # Connection test failed
+                redis_error = handle_redis_error(
+                    "connection_test", self._config.redis.host, self._config.redis.port, ping_error
+                )
+
+                # Check if we should fail hard or continue without Redis
+                fail_on_error = getattr(self._config.redis, "fail_on_error", True)
+
+                if fail_on_error:
+                    # Raise exception to prevent initialization
+                    raise redis_error
+                else:
+                    # Log warning and continue without Redis
+                    if self.verbose:
+                        self._logger.warning(f"Redis connection failed: {redis_error}")
+                    self._streamer = None
+
+        except ImportError as e:
+            error_msg = "redis_robot_comm package not found. " "Install with: pip install redis-robot-comm"
             if self.verbose:
-                self._logger.info(f"Initialized input streamer: {self._stream_name}")
+                self._logger.error(error_msg)
+            raise DependencyError("redis_robot_comm", "Redis streaming", error_msg) from e
+
+        except RedisConnectionError:
+            # Re-raise Redis connection errors
+            raise
+
         except Exception as e:
             redis_error = handle_redis_error("initialization", self._config.redis.host, self._config.redis.port, e)
-            if self.verbose:
-                self._logger.warning(f"Redis streamer initialization failed: {redis_error}")
-            self._streamer = None
+
+            fail_on_error = getattr(self._config.redis, "fail_on_error", True)
+
+            if fail_on_error:
+                raise redis_error
+            else:
+                if self.verbose:
+                    self._logger.warning(f"Redis initialization failed: {redis_error}")
+                self._streamer = None
 
     def _initialize_annotated_streamer(self):
-        """Initialize Redis image streamer for annotated images."""
+        """
+        Initialize Redis image streamer for annotated images.
+
+        Note: Failures here are non-critical and will only log warnings
+        """
         if not self._publish_annotated:
             self._annotated_streamer = None
             return
 
         try:
             self._annotated_streamer = RedisImageStreamer(stream_name=self._annotated_stream_name)
-            if self.verbose:
-                self._logger.info(f"Initialized annotated streamer: {self._annotated_stream_name}")
+
+            # Verify connection
+            try:
+                self._annotated_streamer._redis_client.ping()
+                if self.verbose:
+                    self._logger.info(f"✓ Initialized annotated streamer: {self._annotated_stream_name}")
+            except Exception as ping_error:
+                if self.verbose:
+                    self._logger.warning(f"Annotated streamer connection test failed: {ping_error}")
+                self._annotated_streamer = None
+
         except Exception as e:
             redis_error = handle_redis_error("initialization", self._config.redis.host, self._config.redis.port, e)
             if self.verbose:

@@ -38,6 +38,7 @@ class RedisConfig:
     detection_stream: str = "detected_objects"
     connection_timeout: int = 5
     retry_attempts: int = 3
+    fail_on_error: bool = True  # NEW: If True, raise exception on Redis errors
 
 
 @dataclass
@@ -328,3 +329,49 @@ def create_test_config() -> VisionConfig:
     config.set_object_labels(test_labels)
 
     return config
+
+
+def test_redis_connection(self) -> bool:
+    """
+    Test if Redis connection is working.
+
+    Returns:
+        bool: True if Redis is available and responding
+    """
+    if self._streamer is None:
+        return False
+
+    try:
+        self._streamer._redis_client.ping()
+        return True
+    except Exception as e:
+        if self.verbose:
+            self._logger.warning(f"Redis connection test failed: {e}")
+        return False
+
+
+def get_redis_info(self) -> dict:
+    """
+    Get Redis connection information.
+
+    Returns:
+        dict: Information about Redis connection status
+    """
+    info = {
+        "host": self._config.redis.host,
+        "port": self._config.redis.port,
+        "input_stream": self._stream_name,
+        "annotated_stream": self._annotated_stream_name,
+        "streamer_available": self._streamer is not None,
+        "annotated_streamer_available": self._annotated_streamer is not None,
+        "connection_ok": False,
+    }
+
+    if self._streamer is not None:
+        try:
+            self._streamer._redis_client.ping()
+            info["connection_ok"] = True
+        except Exception:
+            pass
+
+    return info
