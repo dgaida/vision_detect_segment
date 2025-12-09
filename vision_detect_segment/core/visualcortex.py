@@ -135,7 +135,7 @@ class VisualCortex:
             # Verify connection by attempting a ping
             try:
                 # Try to access Redis to verify connection
-                self._streamer._redis_client.ping()
+                self._streamer.client.ping()
                 if self.verbose:
                     self._logger.info(f"✓ Initialized input streamer: {self._stream_name}")
             except Exception as ping_error:
@@ -193,7 +193,7 @@ class VisualCortex:
 
             # Verify connection
             try:
-                self._annotated_streamer._redis_client.ping()
+                self._annotated_streamer.client.ping()
                 if self.verbose:
                     self._logger.info(f"✓ Initialized annotated streamer: {self._annotated_stream_name}")
             except Exception as ping_error:
