@@ -49,6 +49,12 @@ jobs:
               || fromJSON('["3.11"]') }}
       fail-fast: false
 
+    services:
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+
     steps:
     - uses: actions/checkout@v3
 
