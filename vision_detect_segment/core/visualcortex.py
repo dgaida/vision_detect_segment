@@ -681,6 +681,15 @@ class VisualCortex:
             self._label_monitor_stop.set()
             self._label_monitor_thread.join(timeout=2.0)
 
+        # FIX: Clear large objects to prevent memory accumulation
+        self._img_work = None
+        self._annotated_frame = None
+        self._detected_objects = []
+
+        # Clear GPU cache if available
+        if self._device == "cuda":
+            clear_gpu_cache()
+
     def get_memory_usage(self) -> Dict[str, Any]:
         """Get current memory usage information."""
         try:

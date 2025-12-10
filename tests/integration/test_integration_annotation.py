@@ -354,10 +354,25 @@ class TestAnnotationPublishing:
 
                 # Mock 3 detections
                 mock_detector = Mock()
-                mock_detector.detect_objects = Mock(
-                    return_value=[{"label": f"obj{i}", "confidence": 0.9, "bbox": {}} for i in range(3)]
+                # Mock 3 detections
+                detections_list = [
+                    {
+                        "label": f"obj{i}",
+                        "confidence": 0.9,
+                        "bbox": {"x_min": i * 50, "y_min": i * 50, "x_max": i * 50 + 40, "y_max": i * 50 + 40},
+                    }
+                    for i in range(3)
+                ]
+                mock_detector.detect_objects = Mock(return_value=detections_list)
+
+                mock_detections = sv.Detections(
+                    xyxy=np.array([[0, 0, 40, 40], [50, 50, 90, 90], [100, 100, 140, 140]]),
+                    confidence=np.array([0.9, 0.9, 0.9]),
+                    class_id=np.array([0, 1, 2]),
                 )
-                mock_detector.get_detections = Mock(return_value=None)
+                mock_detector.get_detections = Mock(return_value=mock_detections)
+                mock_detector.get_label_texts = Mock(return_value=np.array(["obj0", "obj1", "obj2"]))
+
                 cortex._object_detector = mock_detector
 
                 # Process with custom metadata

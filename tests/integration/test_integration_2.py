@@ -16,6 +16,8 @@ from vision_detect_segment.core.object_tracker import ObjectTracker
 from vision_detect_segment.utils.config import create_test_config
 from vision_detect_segment.utils.utils import create_test_image
 
+from vision_detect_segment.utils.exceptions import RedisConnectionError
+
 
 class TestRedisIntegration:
     """Test Redis integration across components."""
@@ -80,14 +82,14 @@ class TestRedisIntegration:
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer") as mock_redis:
                 mock_redis.side_effect = Exception("Redis connection failed")
 
-                # Should not raise, should handle gracefully
-                cortex = VisualCortex(
-                    objdetect_model_id="owlv2",
-                    device="cpu",
-                    config=config,
-                )
+                with pytest.raises(RedisConnectionError):
+                    cortex = VisualCortex(
+                        objdetect_model_id="owlv2",
+                        device="cpu",
+                        config=config,
+                    )
 
-                assert cortex._streamer is None
+                    assert cortex._streamer is None
 
     def test_detection_publishing_to_redis(self):
         """Test publishing detections to Redis."""
@@ -198,6 +200,7 @@ class TestLabelManagementIntegration:
 
 
 def create_boxes():
+    """Helper to create properly structured mock boxes for YOLO tests."""
     box1 = Mock()
     box1.cls = 0
     box1.conf = 0.9
@@ -252,8 +255,6 @@ class TestYOLOIntegration:
         mock_result.boxes.conf = np.array([0.9, 0.85])
         mock_result.boxes.xyxy = torch.tensor([[10, 20, 100, 200], [150, 50, 250, 150]])
 
-        # FIX: id should be a torch tensor, not numpy array
-        # because the code does: results[0].boxes.id.cpu().numpy().astype(int)
         mock_result.boxes.id = torch.tensor([1, 2])
         mock_result.names = {0: "object1", 1: "object2"}
 
@@ -262,6 +263,10 @@ class TestYOLOIntegration:
 
         # Also need to mock the model's track method which is actually called
         detector._model.track = Mock(return_value=[mock_result])
+
+        detector._tracker.update_label_history = Mock(return_value=["object1", "object2"])
+        detector._tracker.detect_lost_tracks = Mock(return_value=[])
+        detector._tracker.cleanup_lost_tracks = Mock()
 
         results = detector.detect_objects(image)
 
