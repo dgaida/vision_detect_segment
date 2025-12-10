@@ -62,45 +62,46 @@ class TestAnnotationPipeline:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=True, config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=True, config=config)
 
-                # Mock detector with detections
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(
-                    return_value=[
-                        {
-                            "label": "test_object",
-                            "confidence": 0.95,
-                            "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150},
-                        }
-                    ]
-                )
+                    # Mock detector with detections
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(
+                        return_value=[
+                            {
+                                "label": "test_object",
+                                "confidence": 0.95,
+                                "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150},
+                            }
+                        ]
+                    )
 
-                # Mock supervision detections
-                mock_detections = sv.Detections(
-                    xyxy=np.array([[50, 50, 150, 150]]), confidence=np.array([0.95]), class_id=np.array([0])
-                )
-                mock_detector.get_detections = Mock(return_value=mock_detections)
-                mock_detector.get_label_texts = Mock(return_value=np.array(["test_object (0.95)"]))
+                    # Mock supervision detections
+                    mock_detections = sv.Detections(
+                        xyxy=np.array([[50, 50, 150, 150]]), confidence=np.array([0.95]), class_id=np.array([0])
+                    )
+                    mock_detector.get_detections = Mock(return_value=mock_detections)
+                    mock_detector.get_label_texts = Mock(return_value=np.array(["test_object (0.95)"]))
 
-                cortex._object_detector = mock_detector
+                    cortex._object_detector = mock_detector
 
-                # Process image
-                image = create_test_image(shapes=["square"])
-                cortex.process_image_callback(image, {"frame_id": 1}, None)
+                    # Process image
+                    image = create_test_image(shapes=["square"])
+                    cortex.process_image_callback(image, {"frame_id": 1}, None)
 
-                # Verify annotated frame created
-                annotated = cortex.get_annotated_image()
-                assert annotated is not None
-                assert annotated.shape[0] > 0
-                assert annotated.shape[1] > 0
+                    # Verify annotated frame created
+                    annotated = cortex.get_annotated_image()
+                    assert annotated is not None
+                    assert annotated.shape[0] > 0
+                    assert annotated.shape[1] > 0
 
-                # Annotated frame should be larger due to scaling
-                scale_factor = config.annotation.resize_scale_factor
-                expected_height = int(image.shape[0] * scale_factor)
-                assert abs(annotated.shape[0] - expected_height) < 5  # Allow small difference
+                    # Annotated frame should be larger due to scaling
+                    scale_factor = config.annotation.resize_scale_factor
+                    expected_height = int(image.shape[0] * scale_factor)
+                    assert abs(annotated.shape[0] - expected_height) < 5  # Allow small difference
 
-                print(f"✓ Basic annotation created: {annotated.shape}")
+                    print(f"✓ Basic annotation created: {annotated.shape}")
 
     def test_annotation_with_multiple_objects(self):
         """Test annotation with multiple detected objects."""
@@ -108,50 +109,51 @@ class TestAnnotationPipeline:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
 
-                # Mock multiple detections
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(
-                    return_value=[
-                        {
-                            "label": "object1",
-                            "confidence": 0.95,
-                            "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150},
-                        },
-                        {
-                            "label": "object2",
-                            "confidence": 0.90,
-                            "bbox": {"x_min": 200, "y_min": 100, "x_max": 300, "y_max": 200},
-                        },
-                        {
-                            "label": "object3",
-                            "confidence": 0.85,
-                            "bbox": {"x_min": 350, "y_min": 150, "x_max": 450, "y_max": 250},
-                        },
-                    ]
-                )
+                    # Mock multiple detections
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(
+                        return_value=[
+                            {
+                                "label": "object1",
+                                "confidence": 0.95,
+                                "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150},
+                            },
+                            {
+                                "label": "object2",
+                                "confidence": 0.90,
+                                "bbox": {"x_min": 200, "y_min": 100, "x_max": 300, "y_max": 200},
+                            },
+                            {
+                                "label": "object3",
+                                "confidence": 0.85,
+                                "bbox": {"x_min": 350, "y_min": 150, "x_max": 450, "y_max": 250},
+                            },
+                        ]
+                    )
 
-                mock_detections = sv.Detections(
-                    xyxy=np.array([[50, 50, 150, 150], [200, 100, 300, 200], [350, 150, 450, 250]]),
-                    confidence=np.array([0.95, 0.90, 0.85]),
-                    class_id=np.array([0, 1, 2]),
-                )
-                mock_detector.get_detections = Mock(return_value=mock_detections)
-                mock_detector.get_label_texts = Mock(
-                    return_value=np.array(["object1 (0.95)", "object2 (0.90)", "object3 (0.85)"])
-                )
+                    mock_detections = sv.Detections(
+                        xyxy=np.array([[50, 50, 150, 150], [200, 100, 300, 200], [350, 150, 450, 250]]),
+                        confidence=np.array([0.95, 0.90, 0.85]),
+                        class_id=np.array([0, 1, 2]),
+                    )
+                    mock_detector.get_detections = Mock(return_value=mock_detections)
+                    mock_detector.get_label_texts = Mock(
+                        return_value=np.array(["object1 (0.95)", "object2 (0.90)", "object3 (0.85)"])
+                    )
 
-                cortex._object_detector = mock_detector
+                    cortex._object_detector = mock_detector
 
-                # Process image
-                image = create_test_image(shapes=["square", "circle"])
-                cortex.process_image_callback(image, {}, None)
+                    # Process image
+                    image = create_test_image(shapes=["square", "circle"])
+                    cortex.process_image_callback(image, {}, None)
 
-                annotated = cortex.get_annotated_image()
-                assert annotated is not None
+                    annotated = cortex.get_annotated_image()
+                    assert annotated is not None
 
-                print(f"✓ Annotation with {len(mock_detector.detect_objects())} objects")
+                    print(f"✓ Annotation with {len(mock_detector.detect_objects())} objects")
 
     def test_annotation_with_masks(self):
         """Test annotation includes segmentation masks."""
@@ -160,43 +162,44 @@ class TestAnnotationPipeline:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
 
-                # Mock detection with mask
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(
-                    return_value=[
-                        {
-                            "label": "test",
-                            "confidence": 0.9,
-                            "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150},
-                            "has_mask": True,
-                        }
-                    ]
-                )
+                    # Mock detection with mask
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(
+                        return_value=[
+                            {
+                                "label": "test",
+                                "confidence": 0.9,
+                                "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150},
+                                "has_mask": True,
+                            }
+                        ]
+                    )
 
-                # Create mock mask
-                mask = np.zeros((480, 640), dtype=bool)
-                mask[50:150, 50:150] = True
+                    # Create mock mask
+                    mask = np.zeros((480, 640), dtype=bool)
+                    mask[50:150, 50:150] = True
 
-                mock_detections = sv.Detections(
-                    xyxy=np.array([[50, 50, 150, 150]]), confidence=np.array([0.9]), class_id=np.array([0])
-                )
-                mock_detections.mask = [mask]
+                    mock_detections = sv.Detections(
+                        xyxy=np.array([[50, 50, 150, 150]]), confidence=np.array([0.9]), class_id=np.array([0])
+                    )
+                    mock_detections.mask = [mask]
 
-                mock_detector.get_detections = Mock(return_value=mock_detections)
-                mock_detector.get_label_texts = Mock(return_value=np.array(["test (0.90)"]))
+                    mock_detector.get_detections = Mock(return_value=mock_detections)
+                    mock_detector.get_label_texts = Mock(return_value=np.array(["test (0.90)"]))
 
-                cortex._object_detector = mock_detector
+                    cortex._object_detector = mock_detector
 
-                # Process image
-                image = create_test_image()
-                cortex.process_image_callback(image, {}, None)
+                    # Process image
+                    image = create_test_image()
+                    cortex.process_image_callback(image, {}, None)
 
-                annotated = cortex.get_annotated_image()
-                assert annotated is not None
+                    annotated = cortex.get_annotated_image()
+                    assert annotated is not None
 
-                print("✓ Annotation with segmentation mask")
+                    print("✓ Annotation with segmentation mask")
 
     def test_annotation_scaling(self):
         """Test annotation coordinate scaling works correctly."""
@@ -205,33 +208,36 @@ class TestAnnotationPipeline:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
 
-                # Mock detection
-                original_bbox = {"x_min": 10, "y_min": 20, "x_max": 50, "y_max": 60}
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(return_value=[{"label": "test", "confidence": 0.9, "bbox": original_bbox}])
+                    # Mock detection
+                    original_bbox = {"x_min": 10, "y_min": 20, "x_max": 50, "y_max": 60}
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(
+                        return_value=[{"label": "test", "confidence": 0.9, "bbox": original_bbox}]
+                    )
 
-                mock_detections = sv.Detections(
-                    xyxy=np.array([[10, 20, 50, 60]]), confidence=np.array([0.9]), class_id=np.array([0])
-                )
-                mock_detector.get_detections = Mock(return_value=mock_detections)
-                mock_detector.get_label_texts = Mock(return_value=np.array(["test (0.90)"]))
+                    mock_detections = sv.Detections(
+                        xyxy=np.array([[10, 20, 50, 60]]), confidence=np.array([0.9]), class_id=np.array([0])
+                    )
+                    mock_detector.get_detections = Mock(return_value=mock_detections)
+                    mock_detector.get_label_texts = Mock(return_value=np.array(["test (0.90)"]))
 
-                cortex._object_detector = mock_detector
+                    cortex._object_detector = mock_detector
 
-                # Process small image
-                image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-                cortex.process_image_callback(image, {}, None)
+                    # Process small image
+                    image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+                    cortex.process_image_callback(image, {}, None)
 
-                annotated = cortex.get_annotated_image()
-                assert annotated is not None
+                    annotated = cortex.get_annotated_image()
+                    assert annotated is not None
 
-                # Check scaling
-                expected_size = int(100 * 3.0)
-                assert abs(annotated.shape[0] - expected_size) < 5
+                    # Check scaling
+                    expected_size = int(100 * 3.0)
+                    assert abs(annotated.shape[0] - expected_size) < 5
 
-                print(f"✓ Annotation scaled: {image.shape} -> {annotated.shape}")
+                    print(f"✓ Annotation scaled: {image.shape} -> {annotated.shape}")
 
 
 class TestAnnotationPublishing:
@@ -245,52 +251,53 @@ class TestAnnotationPublishing:
         annotated_streamer = RedisImageStreamer(stream_name="test_annotated")
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
-            cortex = VisualCortex(
-                objdetect_model_id="owlv2",
-                device="cpu",
-                stream_name="test_input",
-                annotated_stream_name="test_annotated",
-                publish_annotated=True,
-                verbose=True,
-                config=config,
-            )
+            with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                cortex = VisualCortex(
+                    objdetect_model_id="owlv2",
+                    device="cpu",
+                    stream_name="test_input",
+                    annotated_stream_name="test_annotated",
+                    publish_annotated=True,
+                    verbose=True,
+                    config=config,
+                )
 
-            # Mock detection
-            mock_detector = Mock()
-            mock_detector.detect_objects = Mock(
-                return_value=[
-                    {"label": "test", "confidence": 0.9, "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150}}
-                ]
-            )
-            mock_detections = sv.Detections(
-                xyxy=np.array([[50, 50, 150, 150]]), confidence=np.array([0.9]), class_id=np.array([0])
-            )
-            mock_detector.get_detections = Mock(return_value=mock_detections)
-            mock_detector.get_label_texts = Mock(return_value=np.array(["test (0.90)"]))
+                # Mock detection
+                mock_detector = Mock()
+                mock_detector.detect_objects = Mock(
+                    return_value=[
+                        {"label": "test", "confidence": 0.9, "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150}}
+                    ]
+                )
+                mock_detections = sv.Detections(
+                    xyxy=np.array([[50, 50, 150, 150]]), confidence=np.array([0.9]), class_id=np.array([0])
+                )
+                mock_detector.get_detections = Mock(return_value=mock_detections)
+                mock_detector.get_label_texts = Mock(return_value=np.array(["test (0.90)"]))
 
-            cortex._object_detector = mock_detector
+                cortex._object_detector = mock_detector
 
-            # Publish and process
-            test_image = create_test_image()
-            input_streamer.publish_image(test_image, metadata={"frame_id": 1})
+                # Publish and process
+                test_image = create_test_image()
+                input_streamer.publish_image(test_image, metadata={"frame_id": 1})
 
-            time.sleep(0.1)
-            cortex.detect_objects_from_redis()
+                time.sleep(0.1)
+                cortex.detect_objects_from_redis()
 
-            # Wait for publishing
-            time.sleep(0.3)
+                # Wait for publishing
+                time.sleep(0.3)
 
-            # Try to retrieve annotated frame
-            result = annotated_streamer.get_latest_image()
-            if result:
-                annotated_img, meta = result
-                assert annotated_img is not None
-                assert meta.get("annotated") is True
-                assert meta.get("detection_count") == 1
+                # Try to retrieve annotated frame
+                result = annotated_streamer.get_latest_image()
+                if result:
+                    annotated_img, meta = result
+                    assert annotated_img is not None
+                    assert meta.get("annotated") is True
+                    assert meta.get("detection_count") == 1
 
-                print(f"✓ Annotated frame published: {annotated_img.shape}")
-            else:
-                print("⚠ Could not retrieve annotated frame (timing issue)")
+                    print(f"✓ Annotated frame published: {annotated_img.shape}")
+                else:
+                    print("⚠ Could not retrieve annotated frame (timing issue)")
 
     def test_annotation_publishing_disabled(self, redis_available, redis_cleanup):
         """Test annotated frames are NOT published when disabled."""
@@ -299,32 +306,33 @@ class TestAnnotationPublishing:
         input_streamer = RedisImageStreamer(stream_name="test_input")
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
-            cortex = VisualCortex(
-                objdetect_model_id="owlv2",
-                device="cpu",
-                stream_name="test_input",
-                annotated_stream_name="test_annotated",
-                publish_annotated=False,  # Disabled
-                verbose=True,
-                config=config,
-            )
+            with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                cortex = VisualCortex(
+                    objdetect_model_id="owlv2",
+                    device="cpu",
+                    stream_name="test_input",
+                    annotated_stream_name="test_annotated",
+                    publish_annotated=False,  # Disabled
+                    verbose=True,
+                    config=config,
+                )
 
-            mock_detector = Mock()
-            mock_detector.detect_objects = Mock(return_value=[])
-            mock_detector.get_detections = Mock(return_value=None)
-            cortex._object_detector = mock_detector
+                mock_detector = Mock()
+                mock_detector.detect_objects = Mock(return_value=[])
+                mock_detector.get_detections = Mock(return_value=None)
+                cortex._object_detector = mock_detector
 
-            # Process image
-            test_image = create_test_image()
-            input_streamer.publish_image(test_image, metadata={"frame_id": 1})
+                # Process image
+                test_image = create_test_image()
+                input_streamer.publish_image(test_image, metadata={"frame_id": 1})
 
-            time.sleep(0.1)
-            cortex.detect_objects_from_redis()
+                time.sleep(0.1)
+                cortex.detect_objects_from_redis()
 
-            # Annotated frame should still be created locally
-            assert cortex.get_annotated_image() is not None
+                # Annotated frame should still be created locally
+                assert cortex.get_annotated_image() is not None
 
-            print("✓ Annotation not published when disabled")
+                print("✓ Annotation not published when disabled")
 
     def test_annotation_metadata(self, redis_available, redis_cleanup):
         """Test annotated frame metadata is correct."""
@@ -334,48 +342,49 @@ class TestAnnotationPublishing:
         annotated_streamer = RedisImageStreamer(stream_name="test_annotated")
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
-            cortex = VisualCortex(
-                objdetect_model_id="owlv2",
-                device="cpu",
-                stream_name="test_input",
-                annotated_stream_name="test_annotated",
-                publish_annotated=True,
-                config=config,
-            )
+            with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                cortex = VisualCortex(
+                    objdetect_model_id="owlv2",
+                    device="cpu",
+                    stream_name="test_input",
+                    annotated_stream_name="test_annotated",
+                    publish_annotated=True,
+                    config=config,
+                )
 
-            # Mock 3 detections
-            mock_detector = Mock()
-            mock_detector.detect_objects = Mock(
-                return_value=[{"label": f"obj{i}", "confidence": 0.9, "bbox": {}} for i in range(3)]
-            )
-            mock_detector.get_detections = Mock(return_value=None)
-            cortex._object_detector = mock_detector
+                # Mock 3 detections
+                mock_detector = Mock()
+                mock_detector.detect_objects = Mock(
+                    return_value=[{"label": f"obj{i}", "confidence": 0.9, "bbox": {}} for i in range(3)]
+                )
+                mock_detector.get_detections = Mock(return_value=None)
+                cortex._object_detector = mock_detector
 
-            # Process with custom metadata
-            test_image = create_test_image()
-            original_meta = {"robot_id": "robot_001", "workspace": "ws_alpha", "frame_id": 42}
-            input_streamer.publish_image(test_image, metadata=original_meta)
+                # Process with custom metadata
+                test_image = create_test_image()
+                original_meta = {"robot_id": "robot_001", "workspace": "ws_alpha", "frame_id": 42}
+                input_streamer.publish_image(test_image, metadata=original_meta)
 
-            time.sleep(0.1)
-            cortex.detect_objects_from_redis()
-            time.sleep(0.3)
+                time.sleep(0.1)
+                cortex.detect_objects_from_redis()
+                time.sleep(0.3)
 
-            # Check metadata
-            result = annotated_streamer.get_latest_image()
-            if result:
-                _, meta = result
+                # Check metadata
+                result = annotated_streamer.get_latest_image()
+                if result:
+                    _, meta = result
 
-                # Should have original metadata
-                assert meta.get("robot_id") == "robot_001"
-                assert meta.get("workspace") == "ws_alpha"
-                assert meta.get("frame_id") == 42
+                    # Should have original metadata
+                    assert meta.get("robot_id") == "robot_001"
+                    assert meta.get("workspace") == "ws_alpha"
+                    assert meta.get("frame_id") == 42
 
-                # Plus annotation metadata
-                assert meta.get("annotated") is True
-                assert meta.get("detection_count") == 3
-                assert meta.get("model_id") == "owlv2"
+                    # Plus annotation metadata
+                    assert meta.get("annotated") is True
+                    assert meta.get("detection_count") == 3
+                    assert meta.get("model_id") == "owlv2"
 
-                print("✓ Annotation metadata preserved")
+                    print("✓ Annotation metadata preserved")
 
 
 class TestAnnotationEdgeCases:
@@ -387,21 +396,22 @@ class TestAnnotationEdgeCases:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
 
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(return_value=[])
-                mock_detector.get_detections = Mock(return_value=None)
-                cortex._object_detector = mock_detector
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(return_value=[])
+                    mock_detector.get_detections = Mock(return_value=None)
+                    cortex._object_detector = mock_detector
 
-                image = create_test_image()
-                cortex.process_image_callback(image, {}, None)
+                    image = create_test_image()
+                    cortex.process_image_callback(image, {}, None)
 
-                # Should still create annotated frame (just resized)
-                annotated = cortex.get_annotated_image()
-                assert annotated is not None
+                    # Should still create annotated frame (just resized)
+                    annotated = cortex.get_annotated_image()
+                    assert annotated is not None
 
-                print("✓ Annotation created with no detections")
+                    print("✓ Annotation created with no detections")
 
     def test_annotation_with_very_small_image(self):
         """Test annotation with very small input image."""
@@ -409,24 +419,25 @@ class TestAnnotationEdgeCases:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
 
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(return_value=[])
-                mock_detector.get_detections = Mock(return_value=None)
-                cortex._object_detector = mock_detector
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(return_value=[])
+                    mock_detector.get_detections = Mock(return_value=None)
+                    cortex._object_detector = mock_detector
 
-                # Very small image
-                image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
-                cortex.process_image_callback(image, {}, None)
+                    # Very small image
+                    image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+                    cortex.process_image_callback(image, {}, None)
 
-                annotated = cortex.get_annotated_image()
-                assert annotated is not None
+                    annotated = cortex.get_annotated_image()
+                    assert annotated is not None
 
-                # Should be scaled up
-                assert annotated.shape[0] > image.shape[0]
+                    # Should be scaled up
+                    assert annotated.shape[0] > image.shape[0]
 
-                print(f"✓ Small image annotated: {image.shape} -> {annotated.shape}")
+                    print(f"✓ Small image annotated: {image.shape} -> {annotated.shape}")
 
     def test_annotation_error_recovery(self):
         """Test system recovers from annotation errors."""
@@ -434,37 +445,38 @@ class TestAnnotationEdgeCases:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=True, config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=True, config=config)
 
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(return_value=[])
-                mock_detector.get_detections = Mock(return_value=None)
-                cortex._object_detector = mock_detector
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(return_value=[])
+                    mock_detector.get_detections = Mock(return_value=None)
+                    cortex._object_detector = mock_detector
 
-                # Make annotator fail once
-                original_annotate = cortex._corner_annotator.annotate
-                call_count = [0]
+                    # Make annotator fail once
+                    original_annotate = cortex._corner_annotator.annotate
+                    call_count = [0]
 
-                def failing_annotate(*args, **kwargs):
-                    call_count[0] += 1
-                    if call_count[0] == 1:
-                        raise Exception("Annotation failed")
-                    return original_annotate(*args, **kwargs)
+                    def failing_annotate(*args, **kwargs):
+                        call_count[0] += 1
+                        if call_count[0] == 1:
+                            raise Exception("Annotation failed")
+                        return original_annotate(*args, **kwargs)
 
-                cortex._corner_annotator.annotate = failing_annotate
+                    cortex._corner_annotator.annotate = failing_annotate
 
-                # First call fails
-                image = create_test_image()
-                cortex.process_image_callback(image, {"frame": 1}, None)
+                    # First call fails
+                    image = create_test_image()
+                    cortex.process_image_callback(image, {"frame": 1}, None)
 
-                # Should have fallback annotation
-                assert cortex.get_annotated_image() is not None
+                    # Should have fallback annotation
+                    assert cortex.get_annotated_image() is not None
 
-                # Second call succeeds
-                cortex.process_image_callback(image, {"frame": 2}, None)
-                assert cortex.get_annotated_image() is not None
+                    # Second call succeeds
+                    cortex.process_image_callback(image, {"frame": 2}, None)
+                    assert cortex.get_annotated_image() is not None
 
-                print("✓ Recovered from annotation error")
+                    print("✓ Recovered from annotation error")
 
     def test_annotation_with_overlapping_boxes(self):
         """Test annotation handles overlapping bounding boxes."""
@@ -472,38 +484,43 @@ class TestAnnotationEdgeCases:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
 
-                # Mock overlapping detections
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(
-                    return_value=[
-                        {"label": "obj1", "confidence": 0.9, "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150}},
-                        {
-                            "label": "obj2",
-                            "confidence": 0.85,
-                            "bbox": {"x_min": 100, "y_min": 100, "x_max": 200, "y_max": 200},
-                        },
-                    ]
-                )
+                    # Mock overlapping detections
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(
+                        return_value=[
+                            {
+                                "label": "obj1",
+                                "confidence": 0.9,
+                                "bbox": {"x_min": 50, "y_min": 50, "x_max": 150, "y_max": 150},
+                            },
+                            {
+                                "label": "obj2",
+                                "confidence": 0.85,
+                                "bbox": {"x_min": 100, "y_min": 100, "x_max": 200, "y_max": 200},
+                            },
+                        ]
+                    )
 
-                mock_detections = sv.Detections(
-                    xyxy=np.array([[50, 50, 150, 150], [100, 100, 200, 200]]),
-                    confidence=np.array([0.9, 0.85]),
-                    class_id=np.array([0, 1]),
-                )
-                mock_detector.get_detections = Mock(return_value=mock_detections)
-                mock_detector.get_label_texts = Mock(return_value=np.array(["obj1 (0.90)", "obj2 (0.85)"]))
+                    mock_detections = sv.Detections(
+                        xyxy=np.array([[50, 50, 150, 150], [100, 100, 200, 200]]),
+                        confidence=np.array([0.9, 0.85]),
+                        class_id=np.array([0, 1]),
+                    )
+                    mock_detector.get_detections = Mock(return_value=mock_detections)
+                    mock_detector.get_label_texts = Mock(return_value=np.array(["obj1 (0.90)", "obj2 (0.85)"]))
 
-                cortex._object_detector = mock_detector
+                    cortex._object_detector = mock_detector
 
-                image = create_test_image()
-                cortex.process_image_callback(image, {}, None)
+                    image = create_test_image()
+                    cortex.process_image_callback(image, {}, None)
 
-                annotated = cortex.get_annotated_image()
-                assert annotated is not None
+                    annotated = cortex.get_annotated_image()
+                    assert annotated is not None
 
-                print("✓ Overlapping boxes annotated correctly")
+                    print("✓ Overlapping boxes annotated correctly")
 
 
 if __name__ == "__main__":

@@ -605,7 +605,13 @@ class VisualCortex:
                     # Only check periodically
                     if current_time - last_check_time >= check_interval:
                         # Get latest labels from Redis
-                        new_labels = self._label_manager.get_latest_labels(timeout_seconds=5.0)
+                        try:
+                            new_labels = self._label_manager.get_latest_labels(timeout_seconds=5.0)
+                        except Exception as e:
+                            # Handle case where label_manager is mocked or unavailable
+                            if self.verbose:
+                                self._logger.debug(f"Label manager unavailable: {e}")
+                            new_labels = None
 
                         if new_labels is not None:
                             # Get current labels

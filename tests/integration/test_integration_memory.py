@@ -147,41 +147,42 @@ class TestMemoryLeaks:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=False, config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=False, config=config)
 
-                # Mock detector
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(return_value=[])
-                mock_detector.get_detections = Mock(return_value=None)
-                cortex._object_detector = mock_detector
+                    # Mock detector
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(return_value=[])
+                    mock_detector.get_detections = Mock(return_value=None)
+                    cortex._object_detector = mock_detector
 
-                # Record initial memory
-                gc.collect()
-                initial_memory = get_memory_usage()
+                    # Record initial memory
+                    gc.collect()
+                    initial_memory = get_memory_usage()
 
-                # Process many frames
-                num_iterations = 50
+                    # Process many frames
+                    num_iterations = 50
 
-                for i in range(num_iterations):
-                    image = create_test_image()
-                    metadata = {"frame_id": i}
-                    cortex.process_image_callback(image, metadata, None)
+                    for i in range(num_iterations):
+                        image = create_test_image()
+                        metadata = {"frame_id": i}
+                        cortex.process_image_callback(image, metadata, None)
 
-                # Final memory check
-                gc.collect()
-                final_memory = get_memory_usage()
+                    # Final memory check
+                    gc.collect()
+                    final_memory = get_memory_usage()
 
-                memory_increase = final_memory["rss_mb"] - initial_memory["rss_mb"]
+                    memory_increase = final_memory["rss_mb"] - initial_memory["rss_mb"]
 
-                print(
-                    f"VisualCortex Memory: Initial={initial_memory['rss_mb']:.1f}MB, "
-                    f"Final={final_memory['rss_mb']:.1f}MB, "
-                    f"Increase={memory_increase:.1f}MB"
-                )
+                    print(
+                        f"VisualCortex Memory: Initial={initial_memory['rss_mb']:.1f}MB, "
+                        f"Final={final_memory['rss_mb']:.1f}MB, "
+                        f"Increase={memory_increase:.1f}MB"
+                    )
 
-                assert memory_increase < 100, f"Excessive memory increase in VisualCortex: {memory_increase:.1f}MB"
+                    assert memory_increase < 100, f"Excessive memory increase in VisualCortex: {memory_increase:.1f}MB"
 
-                print("✓ No significant memory leak in VisualCortex")
+                    print("✓ No significant memory leak in VisualCortex")
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_gpu_memory_cleanup(self):
@@ -227,42 +228,43 @@ class TestMemoryStability:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=False, config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=False, config=config)
 
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(return_value=[])
-                mock_detector.get_detections = Mock(return_value=None)
-                cortex._object_detector = mock_detector
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(return_value=[])
+                    mock_detector.get_detections = Mock(return_value=None)
+                    cortex._object_detector = mock_detector
 
-                # Sample memory at intervals
-                memory_samples = []
-                num_iterations = 200
-                sample_interval = 20
+                    # Sample memory at intervals
+                    memory_samples = []
+                    num_iterations = 200
+                    sample_interval = 20
 
-                for i in range(num_iterations):
-                    image = create_test_image()
-                    cortex.process_image_callback(image, {"frame_id": i}, None)
+                    for i in range(num_iterations):
+                        image = create_test_image()
+                        cortex.process_image_callback(image, {"frame_id": i}, None)
 
-                    if i % sample_interval == 0:
-                        gc.collect()
-                        mem = get_memory_usage()
-                        memory_samples.append(mem["rss_mb"])
-                        print(f"Frame {i}: {mem['rss_mb']:.1f}MB")
+                        if i % sample_interval == 0:
+                            gc.collect()
+                            mem = get_memory_usage()
+                            memory_samples.append(mem["rss_mb"])
+                            print(f"Frame {i}: {mem['rss_mb']:.1f}MB")
 
-                # Check memory trend
-                # Calculate linear regression slope
-                x = np.arange(len(memory_samples))
-                y = np.array(memory_samples)
-                slope = np.polyfit(x, y, 1)[0]
+                    # Check memory trend
+                    # Calculate linear regression slope
+                    x = np.arange(len(memory_samples))
+                    y = np.array(memory_samples)
+                    slope = np.polyfit(x, y, 1)[0]
 
-                print(f"Memory slope: {slope:.2f} MB/sample")
-                print(f"Memory samples: {memory_samples}")
+                    print(f"Memory slope: {slope:.2f} MB/sample")
+                    print(f"Memory samples: {memory_samples}")
 
-                # Slope should be close to zero (stable)
-                # Allow slight upward trend due to Python overhead
-                assert abs(slope) < 2.0, f"Memory not stable, slope: {slope:.2f} MB/sample"
+                    # Slope should be close to zero (stable)
+                    # Allow slight upward trend due to Python overhead
+                    assert abs(slope) < 2.0, f"Memory not stable, slope: {slope:.2f} MB/sample"
 
-                print(f"✓ Memory stable over {num_iterations} iterations")
+                    print(f"✓ Memory stable over {num_iterations} iterations")
 
     def test_no_memory_accumulation_with_detections(self):
         """Test no memory accumulation when repeatedly detecting objects."""
@@ -270,39 +272,44 @@ class TestMemoryStability:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=False, config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", verbose=False, config=config)
 
-                # Mock detector with actual detections
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(
-                    return_value=[
-                        {"label": "test", "confidence": 0.9, "bbox": {"x_min": 10, "y_min": 20, "x_max": 100, "y_max": 200}}
-                    ]
-                )
-                mock_detector.get_detections = Mock(return_value=None)
-                cortex._object_detector = mock_detector
+                    # Mock detector with actual detections
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(
+                        return_value=[
+                            {
+                                "label": "test",
+                                "confidence": 0.9,
+                                "bbox": {"x_min": 10, "y_min": 20, "x_max": 100, "y_max": 200},
+                            }
+                        ]
+                    )
+                    mock_detector.get_detections = Mock(return_value=None)
+                    cortex._object_detector = mock_detector
 
-                # Record memory samples
-                memory_samples = []
+                    # Record memory samples
+                    memory_samples = []
 
-                for i in range(100):
-                    image = create_test_image()
-                    cortex.process_image_callback(image, {"frame_id": i}, None)
+                    for i in range(100):
+                        image = create_test_image()
+                        cortex.process_image_callback(image, {"frame_id": i}, None)
 
-                    if i % 10 == 0:
-                        gc.collect()
-                        mem = get_memory_usage()
-                        memory_samples.append(mem["rss_mb"])
+                        if i % 10 == 0:
+                            gc.collect()
+                            mem = get_memory_usage()
+                            memory_samples.append(mem["rss_mb"])
 
-                # Check memory variance
-                memory_std = np.std(memory_samples)
-                print(f"Memory std dev: {memory_std:.2f}MB")
-                print(f"Memory range: {min(memory_samples):.1f} - {max(memory_samples):.1f}MB")
+                    # Check memory variance
+                    memory_std = np.std(memory_samples)
+                    print(f"Memory std dev: {memory_std:.2f}MB")
+                    print(f"Memory range: {min(memory_samples):.1f} - {max(memory_samples):.1f}MB")
 
-                # Standard deviation should be small
-                assert memory_std < 10.0, f"High memory variance: {memory_std:.2f}MB"
+                    # Standard deviation should be small
+                    assert memory_std < 10.0, f"High memory variance: {memory_std:.2f}MB"
 
-                print("✓ No memory accumulation with detections")
+                    print("✓ No memory accumulation with detections")
 
 
 @pytest.mark.slow
@@ -359,21 +366,22 @@ class TestResourceCleanup:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(objdetect_model_id="owlv2", device="cpu", config=config)
 
-                # Use cortex
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(return_value=[])
-                mock_detector.get_detections = Mock(return_value=None)
-                cortex._object_detector = mock_detector
+                    # Use cortex
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(return_value=[])
+                    mock_detector.get_detections = Mock(return_value=None)
+                    cortex._object_detector = mock_detector
 
-                for i in range(10):
-                    image = create_test_image()
-                    cortex.process_image_callback(image, {"frame": i}, None)
+                    for i in range(10):
+                        image = create_test_image()
+                        cortex.process_image_callback(image, {"frame": i}, None)
 
-                # Cleanup
-                cortex.cleanup()
-                del cortex
+                    # Cleanup
+                    cortex.cleanup()
+                    del cortex
 
         gc.collect()
         time.sleep(0.1)
