@@ -543,7 +543,9 @@ class VisualCortex:
     def _scale_detections(self, detections: sv.Detections, scale_x: float, scale_y: float) -> sv.Detections:
         """Scale detection coordinates for resized image."""
         try:
-            scaled_xyxy = copy.deepcopy(detections.xyxy)
+            # Create a copy and ensure it's float type to allow multiplication
+            scaled_xyxy = detections.xyxy.astype(np.float64).copy()
+            # scaled_xyxy = copy.deepcopy(detections.xyxy)
             scaled_xyxy[:, [0, 2]] *= scale_x  # Scale x-coordinates
             scaled_xyxy[:, [1, 3]] *= scale_y  # Scale y-coordinates
 
