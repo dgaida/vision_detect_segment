@@ -225,11 +225,22 @@ class ObjectDetector:
             }
             detected_objects.append(obj_dict)
 
-        # Extract track IDs
+        # Extract track IDs - FIXED: Handle both tensor and numpy array
         track_ids = None
         if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
-            print("object_detector id", results[0].boxes.id)
-            track_ids = results[0].boxes.id.cpu().numpy().astype(int)
+            raw_ids = results[0].boxes.id
+
+            # Convert to numpy array if it's a tensor
+            if isinstance(raw_ids, torch.Tensor):
+                track_ids = raw_ids.cpu().numpy().astype(int)
+            elif isinstance(raw_ids, np.ndarray):
+                track_ids = raw_ids.astype(int)
+            else:
+                # Try to convert to numpy array
+                track_ids = np.array(raw_ids, dtype=int)
+
+            if self.verbose:
+                print(f"object_detector track_ids: {track_ids}")
 
             # Add track IDs to objects
             for i, obj in enumerate(detected_objects):

@@ -54,6 +54,19 @@ class ProcessingResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class _Sentinel:
+    """Sentinel value for signaling worker shutdown."""
+
+    priority: int = -1  # Highest priority to ensure it's processed immediately
+
+    def __lt__(self, other):
+        """Always compare as less than (highest priority)."""
+        if isinstance(other, _Sentinel):
+            return False  # Sentinels are equal
+        return True  # Sentinel has higher priority than tasks
+
+
 class BackpressureHandler:
     """
     Handles backpressure when processing falls behind.
@@ -216,10 +229,12 @@ class AsyncProcessor:
         while not self.input_queue.empty() and time.time() < deadline:
             time.sleep(0.1)
 
-        # Signal workers to stop by putting None sentinels
+        # Signal workers to stop by putting sentinel objects
+        # FIXED: Use _Sentinel instead of None to avoid comparison issues
+        sentinel = _Sentinel()
         for _ in range(self.num_workers):
             try:
-                self.input_queue.put(None, timeout=1.0)
+                self.input_queue.put(sentinel, timeout=1.0)
             except queue.Full:
                 pass
 
@@ -312,8 +327,9 @@ class AsyncProcessor:
                 # Get task from queue
                 task = self.input_queue.get(timeout=0.5)
 
-                # None is sentinel for shutdown
-                if task is None:
+                # Check for sentinel (shutdown signal)
+                # FIXED: Check for _Sentinel instead of None
+                if isinstance(task, _Sentinel):
                     break
 
                 batch.append(task)
