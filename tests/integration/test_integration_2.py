@@ -77,19 +77,21 @@ class TestRedisIntegration:
     def test_redis_connection_failure(self):
         """Test handling Redis connection failure."""
         config = create_test_config()
+        # FIXED: Set fail_on_error to True to ensure RedisConnectionError is raised
+        config.redis.fail_on_error = True
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer") as mock_redis:
-                mock_redis.side_effect = Exception("Redis connection failed")
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    mock_redis.side_effect = Exception("Redis connection failed")
 
-                with pytest.raises(RedisConnectionError):
-                    cortex = VisualCortex(
-                        objdetect_model_id="owlv2",
-                        device="cpu",
-                        config=config,
-                    )
-
-                    assert cortex._streamer is None
+                    # FIXED: Should raise RedisConnectionError now
+                    with pytest.raises(RedisConnectionError):
+                        VisualCortex(
+                            objdetect_model_id="owlv2",
+                            device="cpu",
+                            config=config,
+                        )
 
     def test_detection_publishing_to_redis(self):
         """Test publishing detections to Redis."""
@@ -130,23 +132,24 @@ class TestLabelManagementIntegration:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(
-                    objdetect_model_id="owlv2",
-                    device="cpu",
-                    config=config,
-                )
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(
+                        objdetect_model_id="owlv2",
+                        device="cpu",
+                        config=config,
+                    )
 
-                # Setup mock detector
-                mock_detector = Mock()
-                mock_detector.add_label = Mock()
-                mock_detector.get_object_labels = Mock(return_value=[["initial"]])
-                cortex._object_detector = mock_detector
+                    # Setup mock detector
+                    mock_detector = Mock()
+                    mock_detector.add_label = Mock()
+                    mock_detector.get_object_labels = Mock(return_value=[["initial"]])
+                    cortex._object_detector = mock_detector
 
-                # Add new label
-                cortex.add_detectable_object("new_object")
+                    # Add new label
+                    cortex.add_detectable_object("new_object")
 
-                assert mock_detector.add_label.called
-                assert mock_detector.add_label.call_args[0][0] == "new_object"
+                    assert mock_detector.add_label.called
+                    assert mock_detector.add_label.call_args[0][0] == "new_object"
 
     def test_label_consistency_across_frames(self):
         """Test label consistency when processing multiple frames."""
@@ -253,7 +256,8 @@ class TestYOLOIntegration:
         mock_result.boxes.__iter__ = Mock(return_value=iter([box1, box2]))
         mock_result.boxes.cls = np.array([0, 1])
         mock_result.boxes.conf = np.array([0.9, 0.85])
-        mock_result.boxes.xyxy = torch.tensor([[10, 20, 100, 200], [150, 50, 250, 150]])
+        # FIXED: Use numpy array instead of torch tensor for xyxy
+        mock_result.boxes.xyxy = np.array([[10, 20, 100, 200], [150, 50, 250, 150]])
 
         mock_result.boxes.id = torch.tensor([1, 2])
         mock_result.names = {0: "object1", 1: "object2"}
@@ -361,15 +365,16 @@ class TestMemoryManagement:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(
-                    objdetect_model_id="owlv2",
-                    device="cuda",
-                    config=config,
-                )
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(
+                        objdetect_model_id="owlv2",
+                        device="cuda",
+                        config=config,
+                    )
 
-                with patch("vision_detect_segment.core.visualcortex.clear_gpu_cache") as mock_clear:
-                    cortex.clear_cache()
-                    assert mock_clear.called
+                    with patch("vision_detect_segment.core.visualcortex.clear_gpu_cache") as mock_clear:
+                        cortex.clear_cache()
+                        assert mock_clear.called
 
     def test_memory_tracking(self):
         """Test memory usage tracking."""
@@ -377,17 +382,18 @@ class TestMemoryManagement:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(
-                    objdetect_model_id="owlv2",
-                    device="cpu",
-                    config=config,
-                )
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(
+                        objdetect_model_id="owlv2",
+                        device="cpu",
+                        config=config,
+                    )
 
-                # Get memory stats
-                stats = cortex.get_stats()
+                    # Get memory stats
+                    stats = cortex.get_stats()
 
-                assert "device" in stats
-                assert "processed_frames" in stats
+                    assert "device" in stats
+                    assert "processed_frames" in stats
 
 
 class TestAnnotationIntegration:
@@ -402,17 +408,18 @@ class TestAnnotationIntegration:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(
-                    objdetect_model_id="owlv2",
-                    device="cpu",
-                    config=config,
-                )
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(
+                        objdetect_model_id="owlv2",
+                        device="cpu",
+                        config=config,
+                    )
 
-                # Setup mock detector
-                mock_detector = Mock()
-                cortex._object_detector = mock_detector
+                    # Setup mock detector
+                    mock_detector = Mock()
+                    cortex._object_detector = mock_detector
 
-                yield cortex
+                    yield cortex
 
     def test_annotation_with_multiple_detections(self, cortex_for_annotation):
         """Test annotation with multiple objects."""
@@ -514,32 +521,33 @@ class TestPerformanceIntegration:
 
         with patch("vision_detect_segment.core.visualcortex.ObjectDetector"):
             with patch("vision_detect_segment.core.visualcortex.RedisImageStreamer"):
-                cortex = VisualCortex(
-                    objdetect_model_id="owlv2",
-                    device="cpu",
-                    config=config,
-                )
+                with patch("vision_detect_segment.core.visualcortex.RedisLabelManager"):
+                    cortex = VisualCortex(
+                        objdetect_model_id="owlv2",
+                        device="cpu",
+                        config=config,
+                    )
 
-                mock_detector = Mock()
-                mock_detector.detect_objects = Mock(return_value=[])
-                mock_detector.get_detections = Mock(return_value=None)
-                cortex._object_detector = mock_detector
+                    mock_detector = Mock()
+                    mock_detector.detect_objects = Mock(return_value=[])
+                    mock_detector.get_detections = Mock(return_value=None)
+                    cortex._object_detector = mock_detector
 
-                # Process 10 frames
-                num_frames = 10
-                start_time = time.time()
+                    # Process 10 frames
+                    num_frames = 10
+                    start_time = time.time()
 
-                for i in range(num_frames):
-                    image = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-                    cortex.process_image_callback(image, {"frame_id": i}, None)
+                    for i in range(num_frames):
+                        image = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+                        cortex.process_image_callback(image, {"frame_id": i}, None)
 
-                elapsed = time.time() - start_time
+                    elapsed = time.time() - start_time
 
-                # Should process all frames
-                assert cortex._processed_frames == num_frames
+                    # Should process all frames
+                    assert cortex._processed_frames == num_frames
 
-                # Should be reasonably fast (< 5 seconds for 10 mocked frames)
-                assert elapsed < 5.0
+                    # Should be reasonably fast (< 5 seconds for 10 mocked frames)
+                    assert elapsed < 5.0
 
 
 if __name__ == "__main__":
