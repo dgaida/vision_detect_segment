@@ -127,6 +127,10 @@ class ObjectDetector:
             # Initialize Redis broker
             try:
                 self._redis_broker = RedisMessageBroker(redis_host, redis_port)
+
+                self._redis_broker.client.xtrim("detected_objects", maxlen=100, approximate=True)
+
+                print(f"Stream info: {self._redis_broker.get_stream_info()}")
             except Exception as e:
                 redis_error = handle_redis_error("connection", redis_host, redis_port, e)
                 if verbose:
@@ -555,7 +559,7 @@ class ObjectDetector:
         }
 
         try:
-            self._redis_broker.publish_objects(objects, metadata)
+            self._redis_broker.publish_objects(objects, metadata, maxlen=500)
         except Exception as e:
             redis_error = handle_redis_error("publish", self._redis_host, self._redis_port, e)
             if self.verbose:
