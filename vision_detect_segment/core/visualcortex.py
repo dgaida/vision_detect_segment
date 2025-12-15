@@ -48,6 +48,7 @@ class VisualCortex:
         publish_annotated: bool = True,
         verbose: bool = False,
         config: Optional[VisionConfig] = None,
+        publish_detections_during_movement: bool = False,
     ):
         """
         Initialize the VisualCortex.
@@ -60,6 +61,7 @@ class VisualCortex:
             publish_annotated: Whether to publish annotated images to Redis
             verbose: Enable verbose logging
             config: Optional VisionConfig instance
+            publish_detections_during_movement: Whether to publish detections when robot moves
         """
         # Private attributes
         self._objdetect_model_id = objdetect_model_id
@@ -77,6 +79,7 @@ class VisualCortex:
         self._object_detector = None
         self._streamer = None
         self._annotated_streamer = None
+        self._publish_detections_during_movement = publish_detections_during_movement
 
         # Public configuration
         self.verbose = verbose
@@ -237,6 +240,7 @@ class VisualCortex:
             object_labels=object_labels,
             verbose=self.verbose,
             config=self._config,
+            publish_during_movement=self._publish_detections_during_movement,
         )
 
     def detect_objects_from_redis(self) -> bool:
@@ -284,13 +288,17 @@ class VisualCortex:
         workspace_id = metadata.get("workspace_id", "unknown")
         frame_id = metadata.get("frame_id", self._processed_frames)
 
+        is_moving = metadata.get("is_moving", False)
+        robot_moving = metadata.get("robot_moving", False)
+
         try:
             # Validate input image
             validate_image(image)
 
             if self.verbose and image_info:
                 width, height = image_info["width"], image_info["height"]
-                self._logger.info(f"Processing frame {frame_id}: {width}x{height} from {workspace_id}")
+                movement_status = " (MOVING)" if (is_moving or robot_moving) else ""
+                self._logger.info(f"Processing frame {frame_id}: {width}x{height} " f"from {workspace_id}{movement_status}")
 
             # Store current image
             self._img_work = image
@@ -316,7 +324,11 @@ class VisualCortex:
 
             if self.verbose:
                 if detected_objects:
-                    self._logger.info(f"Found {len(detected_objects)} objects")
+                    publish_status = ""
+                    if not self._publish_detections_during_movement and (is_moving or robot_moving):
+                        publish_status = " (not published - robot moving)"
+
+                    self._logger.info(f"Found {len(detected_objects)} objects{publish_status}")
                     if self.verbose:  # Extra detail in verbose mode
                         summary = format_detection_results(detected_objects, max_items=5)
                         self._logger.debug(summary)
@@ -352,6 +364,14 @@ class VisualCortex:
                 "model_id": self._objdetect_model_id,
             }
 
+            is_moving = (
+                original_metadata.get("is_moving", False)
+                or original_metadata.get("robot_moving", False)
+                or original_metadata.get("camera_moving", False)
+            )
+
+            annotated_metadata["detections_published"] = self._publish_detections_during_movement or not is_moving
+
             # Publish to Redis
             with Timer("Publishing annotated frame", self._logger if self.verbose else None):
                 stream_id = self._annotated_streamer.publish_image(
@@ -359,12 +379,30 @@ class VisualCortex:
                 )
 
             if self.verbose:
-                self._logger.debug(f"Published annotated frame {frame_id} to Redis: {stream_id}")
+                movement_note = " (robot moving)" if is_moving else ""
+                self._logger.debug(f"Published annotated frame {frame_id} to Redis{movement_note}: {stream_id}")
 
         except Exception as e:
             redis_error = handle_redis_error("publish", self._config.redis.host, self._config.redis.port, e)
             if self.verbose:
                 self._logger.warning(f"Failed to publish annotated frame: {redis_error}")
+
+    def set_publish_detections_during_movement(self, enable: bool):
+        """
+        Enable or disable publishing detections during robot movement.
+        Annotated frames are always published regardless of this setting.
+
+        Args:
+            enable: Whether to publish detections when robot is moving
+        """
+        self._publish_detections_during_movement = enable
+
+        if self._object_detector:
+            self._object_detector.set_publish_during_movement(enable)
+
+        if self.verbose:
+            status = "enabled" if enable else "disabled"
+            self._logger.info(f"Publishing detections during movement {status}")
 
     def add_detectable_object(self, object_name: str):
         """
@@ -452,18 +490,19 @@ class VisualCortex:
         return self._publish_annotated and self._annotated_streamer is not None
 
     # Private methods
-    def _run_detection(self, image_rgb: np.ndarray) -> List[Dict]:
+    def _run_detection(self, image_rgb: np.ndarray, metadata: Optional[Dict[str, Any]] = None) -> List[Dict]:
         """
         Run object detection on RGB image.
 
         Args:
             image_rgb: Input image in RGB format (required for detection models)
+            metadata: Image metadata containing robot state
         """
         if image_rgb is None or self._object_detector is None:
             return []
 
         try:
-            return self._object_detector.detect_objects(image_rgb)
+            return self._object_detector.detect_objects(image_rgb, metadata=metadata)
         except Exception as e:
             if self.verbose:
                 self._logger.error(f"Detection failed: {e}")

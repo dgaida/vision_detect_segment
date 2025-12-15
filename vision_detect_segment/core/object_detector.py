@@ -2,7 +2,7 @@ import numpy as np
 import time
 import base64
 import os
-from typing import List, Dict, Optional, Tuple, Union
+from typing import List, Dict, Optional, Tuple, Union, Any
 import torch
 import supervision as sv
 from datetime import datetime
@@ -69,6 +69,7 @@ class ObjectDetector:
         verbose: bool = False,
         config: Optional[VisionConfig] = None,
         enable_tracking: bool = True,
+        publish_during_movement: bool = False,
     ):
         """
         Initialize ObjectDetector.
@@ -82,7 +83,8 @@ class ObjectDetector:
             stream_name: Redis stream name for publishing detections
             verbose: Enable verbose logging
             config: Optional VisionConfig instance
-            enable_tracking:
+            enable_tracking: Enable object tracking
+            publish_during_movement: Whether to publish detections when robot is moving
         """
         # Private attributes
         self._device = get_optimal_device(prefer_gpu=(device != "cpu"))
@@ -96,6 +98,7 @@ class ObjectDetector:
         self._redis_host = redis_host
         self._redis_port = redis_port
         self._stream_name = stream_name
+        self._publish_during_movement = publish_during_movement
 
         # Public configuration
         self.verbose = verbose
@@ -170,7 +173,9 @@ class ObjectDetector:
             return ". ".join(flat_labels) + "."
         return labels
 
-    def detect_objects(self, image: np.ndarray, confidence_threshold: Optional[float] = None) -> List[Dict]:
+    def detect_objects(
+        self, image: np.ndarray, confidence_threshold: Optional[float] = None, metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict]:
         """
         Run object detection or tracking on the given image.
         Returns a list of detections, optionally with track IDs.
@@ -178,6 +183,7 @@ class ObjectDetector:
         Args:
             image: Input image as numpy array in RGB format
             confidence_threshold: Minimum confidence for detections
+            metadata: Optional metadata containing robot state (e.g., is_moving)
 
         Returns:
             List of detected objects as dictionaries
@@ -190,17 +196,61 @@ class ObjectDetector:
         try:
             with Timer("Object detection", self._logger if self.verbose else None):
                 if "yoloe" in self._model_id.lower():
-                    return self._detect_yoloe(image, threshold)
+                    detected_objects = self._detect_yoloe(image, threshold)
                 elif self._model_id == "yolo-world":
-                    return self._detect_yolo(image, threshold)
+                    detected_objects = self._detect_yolo(image, threshold)
                 else:
-                    return self._detect_transformer_based(image, threshold)
+                    detected_objects = self._detect_transformer_based(image, threshold)
+
+                # NEW: Conditionally publish based on robot movement
+                should_publish = self._should_publish_detections(metadata)
+                if should_publish:
+                    self._publish_detections(detected_objects, self._model_id)
+                elif self.verbose:
+                    self._logger.info("Skipping detection publishing - robot is moving")
+
+                return detected_objects
         except Exception as e:
             detection_error = handle_detection_error(e, image.shape, self._model_id)
             print(detection_error)
             if self.verbose:
                 self._logger.error(str(detection_error))
             return []
+
+    def _should_publish_detections(self, metadata: Optional[Dict[str, Any]]) -> bool:
+        """
+        Determine if detections should be published based on robot state.
+
+        Args:
+            metadata: Image metadata potentially containing robot movement state
+
+        Returns:
+            bool: True if detections should be published
+        """
+        # If publishing during movement is enabled, always publish
+        if self._publish_during_movement:
+            return True
+
+        # If no metadata provided, assume robot is stationary (safe default)
+        if metadata is None:
+            return True
+
+        # Check for movement indicators in metadata
+        is_moving = metadata.get("is_moving", False)
+        robot_moving = metadata.get("robot_moving", False)
+        camera_moving = metadata.get("camera_moving", False)
+
+        # Don't publish if any movement indicator is True
+        if is_moving or robot_moving or camera_moving:
+            if self.verbose:
+                self._logger.debug(
+                    f"Robot movement detected - skipping detection publishing "
+                    f"(is_moving={is_moving}, robot_moving={robot_moving}, "
+                    f"camera_moving={camera_moving})"
+                )
+            return False
+
+        return True
 
     def _detect_yolo(self, image: np.ndarray, threshold: float) -> List[Dict]:
         """Run YOLO-World detection with label stabilization."""
@@ -258,7 +308,7 @@ class ObjectDetector:
         self._create_supervision_detections(results, detected_objects, track_ids)
 
         # Publish to Redis
-        self._publish_detections(detected_objects, "yolo-world")
+        # self._publish_detections(detected_objects, "yolo-world")
 
         return detected_objects
 
@@ -331,7 +381,7 @@ class ObjectDetector:
         self._create_supervision_detections(results, detected_objects, track_ids)
 
         # Publish to Redis
-        self._publish_detections(detected_objects, self._model_id)
+        # self._publish_detections(detected_objects, self._model_id)
 
         return detected_objects
 
@@ -397,7 +447,7 @@ class ObjectDetector:
         detected_objects = self._add_segmentation(detected_objects, image, results[0]["boxes"])
 
         # Publish to Redis
-        self._publish_detections(detected_objects, self._model_id)
+        # self._publish_detections(detected_objects, self._model_id)
 
         return detected_objects
 
@@ -625,6 +675,18 @@ class ObjectDetector:
         processor = AutoProcessor.from_pretrained(model_path)
         model = AutoModelForZeroShotObjectDetection.from_pretrained(model_path).to(self._device)
         return model, processor
+
+    def set_publish_during_movement(self, enable: bool):
+        """
+        Enable or disable publishing detections during robot movement.
+
+        Args:
+            enable: Whether to publish detections when robot is moving
+        """
+        self._publish_during_movement = enable
+        if self.verbose:
+            status = "enabled" if enable else "disabled"
+            self._logger.info(f"Publishing during movement {status}")
 
     # Public API methods
     def add_label(self, label: str):
