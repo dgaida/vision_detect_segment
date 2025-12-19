@@ -1,0 +1,76 @@
+---
+config:
+  layout: dagre
+  flowchart:
+    htmlLabels: true
+---
+flowchart TB
+    subgraph RedisPackage["<span style='font-size:18px;font-weight:bold;'>redis_robot_comm</span>"]
+        ImageStreamer@{ label: "<span style='font-size:15px;font-weight:bold;'>Redis ImageStreamer</span>" }
+
+        RedisImages[("<span style='font-size:15px;font-weight:bold;'>Redis Stream</span><br><span style='font-size:13px;color:#c62828;'>robot_camera</span><br><br><span style='font-size:11px;'>• base64 JPEG<br>• width/height<br>• metadata<br>• timestamp</span>")]
+
+        MessageBroker@{ label: "<span style='font-size:15px;font-weight:bold;'>Redis MessageBroker</span>" }
+
+        RedisObjects[("<span style='font-size:15px;font-weight:bold;'>Redis Stream</span><br><span style='font-size:13px;color:#c62828;'>detected_objects</span><br><br><span style='font-size:11px;'>• label, confidence<br>• bbox coordinates<br>• track_id (optional)<br>• mask (optional)</span>")]
+    end
+
+    subgraph VisionPackage["<span style='font-size:18px;font-weight:bold;'>vision_detect_segment</span>"]
+        VisualCortex@{ label: "<span style='font-size:15px;font-weight:bold;'>VisualCortex</span>" }
+
+        Detector@{ label: "<span style='font-size:14px;font-weight:bold;'>ObjectDetector</span>" }
+
+        Tracker@{ label: "<span style='font-size:14px;font-weight:bold;'>ObjectTracker</span>" }
+
+        Segmenter@{ label: "<span style='font-size:14px;font-weight:bold;'>ObjectSegmenter</span>" }
+
+        Config@{ label: "<span style='font-size:14px;font-weight:bold;'>VisionConfig</span>" }
+    end
+
+    Camera@{ label: "<span style='font-size:15px;font-weight:bold;'>Image Source</span><br><span style='font-size:13px;color:#1565c0;'>Camera/File</span>" }
+
+    Consumer@{ label: "<span style='font-size:15px;font-weight:bold;'>Downstream Application</span>" }
+
+    Camera -- "<span style='font-size:12px;'><b>❶ cv2.imread()</b></span>" --> ImageStreamer
+
+    ImageStreamer -- "<span style='font-size:12px;'><b>publish_image()</b></span>" --> RedisImages
+
+    Camera -. "<span style='font-size:11px;'>metadata</span>" .-> RedisImages
+
+    RedisImages -- "<span style='font-size:12px;'><b>❷ get_latest_image()</b></span>" --> VisualCortex
+
+    RedisImages -. "<span style='font-size:11px;'>image + metadata</span>" .-> VisualCortex
+
+    VisualCortex -- "<span style='font-size:12px;'><b>❸ detect_objects()</b></span>" --> Detector
+
+    Detector -- "<span style='font-size:12px;'><b>track()</b></span>" --> Tracker
+
+    Tracker -- "<span style='font-size:12px;'><b>segment()</b></span>" --> Segmenter
+
+    Config -. "<span style='font-size:11px;'>config</span>" .-> VisualCortex
+    Config -. "<span style='font-size:11px;'>config</span>" .-> Detector
+
+    Segmenter -- "<span style='font-size:12px;'><b>❹ results</b></span>" --> VisualCortex
+
+    VisualCortex -- "<span style='font-size:12px;'><b>❺ publish_objects()</b></span>" --> MessageBroker
+
+    MessageBroker -- "<span style='font-size:12px;'><b>xadd()</b></span>" --> RedisObjects
+
+    RedisObjects -- "<span style='font-size:12px;'><b>❻ get_latest_objects()</b></span>" --> Consumer
+
+    Camera:::externalStyle
+    Consumer:::externalStyle
+    ImageStreamer:::componentStyle
+    MessageBroker:::componentStyle
+    VisualCortex:::componentStyle
+    RedisImages:::dataStyle
+    RedisObjects:::dataStyle
+    Detector:::subcomponentStyle
+    Tracker:::subcomponentStyle
+    Segmenter:::subcomponentStyle
+    Config:::componentStyle
+
+    classDef externalStyle fill:#bbdefb,stroke:#1565c0,stroke-width:3px
+    classDef componentStyle fill:#c8e6c9,stroke:#2e7d32,stroke-width:3px
+    classDef subcomponentStyle fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef dataStyle fill:#ffcdd2,stroke:#c62828,stroke-width:3px
