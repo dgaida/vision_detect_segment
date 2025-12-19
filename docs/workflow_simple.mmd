@@ -1,0 +1,53 @@
+---
+config:
+  layout: dagre
+  flowchart:
+    htmlLabels: true
+---
+flowchart TB
+    ImageSource(["<span style='font-size:16px;font-weight:bold;'>Image Source</span><br><span style='font-size:13px;color:#1565c0;'>(Camera/File)</span>"])
+
+    Redis[("<span style='font-size:16px;font-weight:bold;'>Redis Server</span><br><span style='font-size:13px;color:#e65100;'>(Streams)</span>")]
+
+    VisualCortex@{ label: "<span style='font-size:16px;font-weight:bold;'>VisualCortex</span><br><span style='font-size:13px;color:#1565c0;'>Main Processing Component</span>" }
+
+    Detector@{ label: "<span style='font-size:15px;font-weight:bold;'>ObjectDetector</span><br><span style='font-size:12px;color:#2e7d32;'>Detect Objects</span>" }
+
+    Tracker@{ label: "<span style='font-size:15px;font-weight:bold;'>ObjectTracker</span><br><span style='font-size:12px;color:#2e7d32;'>Track Objects (Optional)</span>" }
+
+    Segmenter@{ label: "<span style='font-size:15px;font-weight:bold;'>ObjectSegmenter</span><br><span style='font-size:12px;color:#2e7d32;'>Segment Objects (Optional)</span>" }
+
+    Results[("<span style='font-size:16px;font-weight:bold;'>Detection Results</span><br><span style='font-size:13px;color:#e65100;'>(Redis)</span>")]
+
+    Consumer@{ label: "<span style='font-size:16px;font-weight:bold;'>Downstream Consumer</span><br><span style='font-size:13px;color:#1565c0;'>Results Processing</span>" }
+
+    ImageSource -- "<span style='font-size:13px;'><b>1. Publish Image</b><br>RedisImageStreamer</span>" --> Redis
+
+    ImageSource -. "<span style='font-size:11px;'>Metadata: pose, workspace</span>" .-> Redis
+
+    Redis -- "<span style='font-size:13px;'><b>2. Get Latest Image</b></span>" --> VisualCortex
+
+    VisualCortex -- "<span style='font-size:13px;'><b>3. Detect Objects</b></span>" --> Detector
+
+    Detector -- "<span style='font-size:13px;'><b>4. Track Objects</b><br>(Optional)</span>" --> Tracker
+
+    Tracker -- "<span style='font-size:13px;'><b>5. Segment Objects</b><br>(Optional)</span>" --> Segmenter
+
+    Segmenter -- "<span style='font-size:13px;'><b>6. Return</b></span>" --> VisualCortex
+
+    VisualCortex -- "<span style='font-size:13px;'><b>7. Publish Detections</b><br>RedisMessageBroker</span>" --> Results
+
+    Results -- "<span style='font-size:13px;'><b>8. Consume Results</b></span>" --> Consumer
+
+    ImageSource:::componentStyle
+    VisualCortex:::componentStyle
+    Consumer:::componentStyle
+    Redis:::dataStyle
+    Results:::dataStyle
+    Detector:::processStyle
+    Tracker:::processStyle
+    Segmenter:::processStyle
+
+    classDef componentStyle fill:#bbdefb,stroke:#1565c0,stroke-width:3px
+    classDef dataStyle fill:#ffe0b2,stroke:#e65100,stroke-width:3px
+    classDef processStyle fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px

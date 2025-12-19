@@ -9,6 +9,8 @@ import sys
 import time
 from vision_detect_segment import VisualCortex, get_default_config
 from vision_detect_segment.utils.exceptions import RedisConnectionError
+from vision_detect_segment.core.visualcortex_metrics import VisionMetrics
+from vision_detect_segment.utils.metrics_exporter import MetricsExporter
 
 
 def check_redis_connection(visual_cortex: VisualCortex) -> bool:
@@ -58,6 +60,14 @@ def main():
             verbose=False,
             config=config,
         )
+
+        # Initialize metrics
+        metrics = VisionMetrics(model_id=det_mdl)
+        visual_cortex._metrics = metrics
+
+        # Start metrics HTTP server
+        exporter = MetricsExporter(port=9090)
+        exporter.start()
     except Exception as e:
         print(f"\n❌ ERROR: Failed to initialize VisualCortex: {e}")
         print("\nPlease check:")
@@ -118,9 +128,14 @@ def main():
                 frame_count += 1
                 consecutive_failures = 0  # Reset failure counter
 
+                metrics.record_frame_processed(success=True)
+
                 if frame_count % 20 == 0:
                     detected = visual_cortex.get_detected_objects()
                     print(f"✓ Processed {frame_count} frames, " f"current detections: {len(detected)}")
+
+                    for det in detected:
+                        metrics.record_detection(class_name=det["label"], confidence=det["confidence"])
             else:
                 consecutive_failures += 1
 
