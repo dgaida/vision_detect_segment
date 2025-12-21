@@ -30,18 +30,6 @@ Designed for robotics applications, this package provides an easy-to-use interfa
 
 ---
 
-## What's New: YOLOE Support
-
-YOLOE (Real-Time Seeing Anything) is the latest addition to our supported models, offering:
-
-- **Unified Detection & Segmentation** - Single model for both tasks
-- **Open-Vocabulary Detection** - Detect custom object classes without retraining
-- **Multiple Prompting Modes** - Text prompts, visual prompts, or prompt-free with 1200+ built-in classes
-- **Real-Time Performance** - Comparable speed to YOLO11 (~130 FPS on GPU)
-- **Superior Accuracy** - Improved performance over YOLO-Worldv2
-
----
-
 ## Supported Models
 
 ### Object Detection Models
@@ -82,22 +70,10 @@ pip install -e .
 
 ### Dependencies
 
-Core dependencies:
-```bash
-pip install torch torchvision
-pip install opencv-python numpy
-pip install supervision
-pip install redis
-```
-
 Model-specific dependencies:
 
 ```bash
-# For OWL-V2 and Grounding-DINO
-pip install transformers
-
-# For YOLO-World and YOLOE
-pip install -U ultralytics>=8.3.0
+pip install torchvision
 
 # For SAM2 segmentation (optional)
 pip install git+https://github.com/facebookresearch/segment-anything-2.git
@@ -367,53 +343,7 @@ print(f"Detectable objects: {labels}")
 
 ## API Reference
 
-### VisualCortex
-
-```python
-cortex = VisualCortex(
-    objdetect_model_id: str,          # "owlv2", "yolo-world", "yoloe-11l", etc.
-    device: str = "auto",              # "auto", "cuda", or "cpu"
-    stream_name: str = "robot_camera", # Redis stream name for input
-    annotated_stream_name: str = "annotated_camera",
-    publish_annotated: bool = True,
-    verbose: bool = False,
-    config: Optional[VisionConfig] = None
-)
-```
-
-**Key Methods:**
-
-| Method | Description | Returns |
-|--------|-------------|---------|
-| `detect_objects_from_redis()` | Trigger detection from Redis | bool |
-| `get_detected_objects()` | Get list of detected objects | List[Dict] |
-| `get_annotated_image()` | Get annotated visualization | np.ndarray |
-| `get_current_image()` | Get current raw image | np.ndarray |
-| `add_detectable_object(label)` | Add new object label | None |
-| `get_stats()` | Get processing statistics | Dict |
-| `clear_cache()` | Clear GPU memory cache | None |
-
-### Detection Results Format
-
-```python
-detected_object = {
-    "label": str,              # Object class name
-    "confidence": float,       # Detection confidence (0-1)
-    "bbox": {                  # Bounding box coordinates
-        "x_min": int,
-        "y_min": int,
-        "x_max": int,
-        "y_max": int
-    },
-    "track_id": int,           # Optional tracking ID
-    "has_mask": bool,          # Whether segmentation mask available
-    "mask_data": str,          # Base64-encoded mask (if available)
-    "mask_shape": List[int],   # Mask dimensions [height, width]
-    "mask_dtype": str          # Mask data type
-}
-```
-
-For complete API documentation, see **[docs/api.md](docs/api.md)**
+For complete API documentation, see **[docs/api.md](docs/api.md)**.
 
 ---
 
@@ -459,49 +389,7 @@ cortex = VisualCortex("owlv2", config=config)
 
 ## Troubleshooting
 
-### Common Issues
-
-**Redis Connection Failed**
-```bash
-# Check if Redis is running
-docker ps | grep redis
-
-# Or start Redis
-docker run -p 6379:6379 redis:alpine
-```
-
-**CUDA Out of Memory**
-```python
-# Use CPU instead
-cortex = VisualCortex("owlv2", device="cpu")
-
-# Or clear cache regularly
-cortex.clear_cache()
-
-# Or use smaller model
-cortex = VisualCortex("yoloe-11s", device="cuda")
-```
-
-**Model Loading Fails**
-```bash
-# Check dependencies
-pip install transformers  # For OWL-V2/Grounding-DINO
-pip install -U ultralytics>=8.3.0  # For YOLO-World/YOLOE
-```
-
-**No Objects Detected**
-```python
-# Lower confidence threshold
-config.model.confidence_threshold = 0.1
-
-# Check object labels
-config.set_object_labels(["expected", "objects"])
-
-# Verify image quality
-cv2.imshow("Input", image)
-```
-
-For more troubleshooting information, see **[docs/vision_workflow_doc.md](docs/vision_workflow_doc.md#troubleshooting)**
+For troubleshooting information, see **[docs/vision_workflow_doc.md](docs/vision_workflow_doc.md#troubleshooting)**.
 
 ---
 
@@ -548,19 +436,7 @@ vision_detect_segment/
 
 ## Testing
 
-```bash
-# Run comprehensive test suite
-python main.py
-
-# Run unit tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=vision_detect_segment --cov-report=html
-
-# View coverage report
-open htmlcov/index.html
-```
+See **[docs/TESTING.md](docs/TESTING.md)**.
 
 ---
 
@@ -596,13 +472,7 @@ pre-commit install
 
 ## Contributing
 
-Contributions are welcome! Please ensure:
-
-- Code follows existing style conventions
-- Private variables use `_` prefix
-- New features include error handling
-- Tests pass successfully
-- Documentation is updated
+See **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ---
 
