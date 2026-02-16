@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import torch
 import copy
+import os
 
 
 @dataclass
@@ -32,13 +33,16 @@ class ModelConfig:
 class RedisConfig:
     """Configuration for Redis connections."""
 
-    host: str = "localhost"
-    port: int = 6379
+    host: str = field(default_factory=lambda: os.getenv("VISION_REDIS_HOST", "localhost"))
+    port: int = field(default_factory=lambda: int(os.getenv("VISION_REDIS_PORT", 6379)))
+    password: Optional[str] = field(default_factory=lambda: os.getenv("VISION_REDIS_PASSWORD"))
+    username: Optional[str] = field(default_factory=lambda: os.getenv("VISION_REDIS_USERNAME"))
+    ssl: bool = field(default_factory=lambda: os.getenv("VISION_REDIS_SSL", "false").lower() == "true")
     stream_name: str = "robot_camera"
     detection_stream: str = "detected_objects"
     connection_timeout: int = 5
     retry_attempts: int = 3
-    fail_on_error: bool = True  # NEW: If True, raise exception on Redis errors
+    fail_on_error: bool = True
 
 
 @dataclass
@@ -90,288 +94,46 @@ class VisionConfig:
     @staticmethod
     def _get_default_labels() -> List[str]:
         """Get the default set of object labels."""
-        geometric_shapes = [
-            "blue circle",
-            "blue square",
-            "blue box",
-            "blue cube",
-            "red circle",
-            "red square",
-            "red box",
-            "red cube",
-            "green circle",
-            "green coin",
-            "green cylinder",
-            "green square",
-            "orange cube",
-            "purple cube",
-            "yellow cube",
-            "green cube",
-        ]
-
-        office_items = [
-            "black pen",
-            "black ballpoint pen",
-            "pen",
-            "pencil",
-            "book",
-            "computer mouse",
-            "usb stick",
-            "remote control",
-            "battery",
-            "batteries",
-            "screwdriver",
-            "screw",
-        ]
-
-        food_items = [
-            "chocolate bar",
-            "bounty",
-            "snickers",
-            "mars",
-            "milky way",
-            "twix",
-            "snickers bar",
-            "sweets",
-            "mandarin",
-            "apple",
-            "coke can",
-        ]
-
+        geometric_shapes = ["blue circle", "blue square", "blue box", "blue cube", "red circle", "red square", "red box", "red cube", "green circle", "green coin", "green cylinder", "green square", "orange cube", "purple cube", "yellow cube", "green cube"]
+        office_items = ["black pen", "black ballpoint pen", "pen", "pencil", "book", "computer mouse", "usb stick", "remote control", "battery", "batteries", "screwdriver", "screw"]
+        food_items = ["chocolate bar", "bounty", "snickers", "mars", "milky way", "twix", "snickers bar", "sweets", "mandarin", "apple", "coke can"]
         lighting_items = ["lighter", "cigarette lighter", "philips batteries"]
-
-        # Combine all categories
-        all_labels = geometric_shapes + office_items + food_items + lighting_items
-        return all_labels
+        return geometric_shapes + office_items + food_items + lighting_items
 
 
 # Predefined model configurations
 MODEL_CONFIGS = {
-    "owlv2": ModelConfig(
-        name="owlv2",
-        confidence_threshold=0.3,
-        model_params={"model_path": "google/owlv2-base-patch16-ensemble", "requires_transformers": True},
-    ),
-    "yolo-world": ModelConfig(
-        name="yolo-world",
-        confidence_threshold=0.25,
-        model_params={"model_path": "yolov8x-worldv2.pt", "requires_ultralytics": True},
-    ),
-    "grounding_dino": ModelConfig(
-        name="grounding_dino",
-        confidence_threshold=0.3,
-        model_params={
-            "model_path": "IDEA-Research/grounding-dino-base",
-            "requires_transformers": True,
-            "text_preprocessing": {"lowercase": True, "join_with_periods": True},
-        },
-    ),
-    # NEW: YOLOE configurations
-    "yoloe-11s": ModelConfig(
-        name="yoloe-11s",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-11s-seg.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,  # YOLOE has integrated segmentation
-            "supports_prompts": True,  # Supports text and visual prompts
-            "prompt_free_variant": "yoloe-11s-seg-pf.pt",  # Prompt-free version
-        },
-    ),
-    "yoloe-11m": ModelConfig(
-        name="yoloe-11m",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-11m-seg.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,
-            "supports_prompts": True,
-            "prompt_free_variant": "yoloe-11m-seg-pf.pt",
-        },
-    ),
-    "yoloe-11l": ModelConfig(
-        name="yoloe-11l",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-11l-seg.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,
-            "supports_prompts": True,
-            "prompt_free_variant": "yoloe-11l-seg-pf.pt",
-        },
-    ),
-    "yoloe-v8s": ModelConfig(
-        name="yoloe-v8s",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-v8s-seg.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,
-            "supports_prompts": True,
-            "prompt_free_variant": "yoloe-v8s-seg-pf.pt",
-        },
-    ),
-    "yoloe-v8m": ModelConfig(
-        name="yoloe-v8m",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-v8m-seg.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,
-            "supports_prompts": True,
-            "prompt_free_variant": "yoloe-v8m-seg-pf.pt",
-        },
-    ),
-    "yoloe-v8l": ModelConfig(
-        name="yoloe-v8l",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-v8l-seg.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,
-            "supports_prompts": True,
-            "prompt_free_variant": "yoloe-v8l-seg-pf.pt",
-        },
-    ),
-    # Prompt-free variants (for use without text/visual prompts)
-    "yoloe-11s-pf": ModelConfig(
-        name="yoloe-11s-pf",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-11s-seg-pf.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,
-            "supports_prompts": False,  # Prompt-free uses internal vocabulary
-            "is_prompt_free": True,
-        },
-    ),
-    "yoloe-11m-pf": ModelConfig(
-        name="yoloe-11m-pf",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-11m-seg-pf.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,
-            "supports_prompts": False,
-            "is_prompt_free": True,
-        },
-    ),
-    "yoloe-11l-pf": ModelConfig(
-        name="yoloe-11l-pf",
-        confidence_threshold=0.25,
-        model_params={
-            "model_path": "yoloe-11l-seg-pf.pt",
-            "requires_ultralytics": True,
-            "has_builtin_segmentation": True,
-            "supports_prompts": False,
-            "is_prompt_free": True,
-        },
-    ),
+    "owlv2": ModelConfig(name="owlv2", confidence_threshold=0.3, model_params={"model_path": "google/owlv2-base-patch16-ensemble", "requires_transformers": True}),
+    "yolo-world": ModelConfig(name="yolo-world", confidence_threshold=0.25, model_params={"model_path": "yolov8x-worldv2.pt", "requires_ultralytics": True}),
+    "grounding_dino": ModelConfig(name="grounding_dino", confidence_threshold=0.3, model_params={"model_path": "IDEA-Research/grounding-dino-base", "requires_transformers": True, "text_preprocessing": {"lowercase": True, "join_with_periods": True}}),
+    "yoloe-11s": ModelConfig(name="yoloe-11s", confidence_threshold=0.25, model_params={"model_path": "yoloe-11s-seg.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": True}),
+    "yoloe-11m": ModelConfig(name="yoloe-11m", confidence_threshold=0.25, model_params={"model_path": "yoloe-11m-seg.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": True}),
+    "yoloe-11l": ModelConfig(name="yoloe-11l", confidence_threshold=0.25, model_params={"model_path": "yoloe-11l-seg.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": True}),
+    "yoloe-11s-pf": ModelConfig(name="yoloe-11s-pf", confidence_threshold=0.25, model_params={"model_path": "yoloe-11s-seg-pf.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": False, "is_prompt_free": True}),
+    "yoloe-11m-pf": ModelConfig(name="yoloe-11m-pf", confidence_threshold=0.25, model_params={"model_path": "yoloe-11m-seg-pf.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": False, "is_prompt_free": True}),
+    "yoloe-11l-pf": ModelConfig(name="yoloe-11l-pf", confidence_threshold=0.25, model_params={"model_path": "yoloe-11l-seg-pf.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": False, "is_prompt_free": True}),
 }
 
 
 def get_model_config(model_name: str) -> ModelConfig:
-    """
-    Get a deep copy of a model configuration to prevent mutation issues.
-
-    Args:
-        model_name: Name of the model configuration to retrieve
-
-    Returns:
-        ModelConfig: A deep copy of the model configuration
-
-    Raises:
-        ValueError: If model_name is not found in MODEL_CONFIGS
-    """
     if model_name not in MODEL_CONFIGS:
         available = list(MODEL_CONFIGS.keys())
         raise ValueError(f"Unknown model '{model_name}'. Available: {available}")
-
-    # Return a deep copy to prevent mutations affecting the original
     return copy.deepcopy(MODEL_CONFIGS[model_name])
 
 
 def get_default_config(model_name: str = "owlv2") -> VisionConfig:
-    """
-    Get a default configuration for the specified model.
-
-    Args:
-        model_name: Name of the detection model to use
-
-    Returns:
-        VisionConfig: Default configuration instance
-
-    Raises:
-        ValueError: If model_name is not supported
-    """
     if model_name not in MODEL_CONFIGS:
-        raise ValueError(f"Unsupported model: {model_name}. " f"Available models: {list(MODEL_CONFIGS.keys())}")
-
+        raise ValueError(f"Unsupported model: {model_name}. Available: {list(MODEL_CONFIGS.keys())}")
     config = VisionConfig()
-    # Use copy.deepcopy to prevent mutations
     config.model = copy.deepcopy(MODEL_CONFIGS[model_name])
     return config
 
 
 def create_test_config() -> VisionConfig:
-    """
-    Create a configuration optimized for testing.
-
-    Returns:
-        VisionConfig: Test configuration with reduced object labels
-    """
     config = get_default_config("owlv2")
     config.verbose = True
-    config.model.confidence_threshold = 0.2  # Lower threshold for testing
-
-    # Use only a subset of labels for faster testing
+    config.model.confidence_threshold = 0.2
     test_labels = ["blue square", "chocolate bar", "mars", "snickers", "red circle", "pen", "book"]
     config.set_object_labels(test_labels)
-
     return config
-
-
-def test_redis_connection(self) -> bool:
-    """
-    Test if Redis connection is working.
-
-    Returns:
-        bool: True if Redis is available and responding
-    """
-    if self._streamer is None:
-        return False
-
-    try:
-        self._streamer._redis_client.ping()
-        return True
-    except Exception as e:
-        if self.verbose:
-            self._logger.warning(f"Redis connection test failed: {e}")
-        return False
-
-
-def get_redis_info(self) -> dict:
-    """
-    Get Redis connection information.
-
-    Returns:
-        dict: Information about Redis connection status
-    """
-    info = {
-        "host": self._config.redis.host,
-        "port": self._config.redis.port,
-        "input_stream": self._stream_name,
-        "annotated_stream": self._annotated_stream_name,
-        "streamer_available": self._streamer is not None,
-        "annotated_streamer_available": self._annotated_streamer is not None,
-        "connection_ok": False,
-    }
-
-    if self._streamer is not None:
-        try:
-            self._streamer._redis_client.ping()
-            info["connection_ok"] = True
-        except Exception:
-            pass
-
-    return info

@@ -1,13 +1,16 @@
 import numpy as np
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import torch
 import supervision as sv
 import cv2
 import copy
 import threading
 import time
+import logging
+import gc
 
 from .object_detector import ObjectDetector
+from .interfaces import DetectedObject
 from ..utils.config import VisionConfig, get_default_config
 from ..utils.exceptions import (
     ImageProcessingError,
@@ -26,6 +29,9 @@ from ..utils.utils import (
     format_detection_results,
     clear_gpu_cache,
 )
+from ..utils.redis_helpers import redis_operation
+from ..utils.retry import retry_with_backoff
+from ..utils.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 
 from redis_robot_comm import RedisImageStreamer
 from redis_robot_comm import RedisLabelManager
@@ -37,6 +43,7 @@ class VisualCortex:
 
     This class integrates object detection models and provides functionality for
     annotating images, detecting objects, and managing the visual processing pipeline.
+    It communicates with other components via Redis streams.
     """
 
     def __init__(
@@ -69,37 +76,44 @@ class VisualCortex:
         self._stream_name = stream_name
         self._annotated_stream_name = annotated_stream_name
         self._publish_annotated = publish_annotated
-        self._img_work = None
-        self._annotated_frame = None
-        self._detected_objects = []
+        self._img_work: Optional[np.ndarray] = None
+        self._annotated_frame: Optional[np.ndarray] = None
+        self._detected_objects: List[Dict[str, Any]] = []
         self._processed_frames = 0
-        self._label_annotator = None
-        self._corner_annotator = None
-        self._halo_annotator = None
-        self._object_detector = None
-        self._streamer = None
-        self._annotated_streamer = None
         self._publish_detections_during_movement = publish_detections_during_movement
+        self._verbose = verbose
 
-        # Public configuration
-        self.verbose = verbose
+        # Config initialization
         self._config = config or get_default_config(objdetect_model_id)
 
         # Setup logging
         self._logger = setup_logging(verbose)
 
+        # Reliability patterns
+        self._redis_circuit_breaker = CircuitBreaker(
+            failure_threshold=self._config.redis.retry_attempts,
+            recovery_timeout=60.0,
+            expected_exception=Exception
+        )
+
         try:
             if verbose:
-                self._logger.info(f"Using device: {self._device}")
-                self._logger.info(f"PyTorch version: {torch.__version__}")
-                self._logger.info(f"CUDA available: {torch.cuda.is_available()}")
+                self._logger.info(f"Initializing VisualCortex on device: {self._device}")
 
             # Initialize components
             with Timer("Initializing VisualCortex", self._logger if verbose else None):
-                self._initialize_redis_streamer()
-                self._initialize_annotated_streamer()
+                self._initialize_redis_streamers()
                 self._setup_annotators()
                 self._initialize_object_detector()
+
+            # Add label manager
+            self._label_manager = RedisLabelManager()
+            self._publish_current_labels()
+
+            # Start label monitoring thread
+            self._label_monitor_thread: Optional[threading.Thread] = None
+            self._label_monitor_stop = threading.Event()
+            self._start_label_monitoring()
 
             if verbose:
                 self._logger.info("VisualCortex initialization completed successfully")
@@ -109,112 +123,45 @@ class VisualCortex:
             self._logger.error(error_msg)
             raise DetectionError(error_msg)
 
-        # Add label manager for publishing detectable objects
-        self._label_manager = RedisLabelManager()
+    def _initialize_redis_streamers(self) -> None:
+        """Initialize both input and annotated image streamers with robust connection testing."""
+        # Input image streamer
+        with redis_operation("initialization", self._config.redis.host, self._config.redis.port, self._logger):
+            self._streamer = RedisImageStreamer(
+                host=self._config.redis.host,
+                port=self._config.redis.port,
+                password=self._config.redis.password,
+                ssl=self._config.redis.ssl,
+                stream_name=self._stream_name
+            )
+            self._streamer.client.ping()
+            if self._verbose:
+                self._logger.info(f"✓ Initialized input streamer: {self._stream_name}")
 
-        # Publish initial labels
-        self._publish_current_labels()
-
-        if verbose:
-            self._logger.info("Published initial detectable labels to Redis")
-
-        # Start label monitoring thread
-        self._label_monitor_thread = None
-        self._label_monitor_stop = threading.Event()
-        # if config and hasattr(config, "enable_label_monitoring") and config.enable_label_monitoring:
-        self._start_label_monitoring()
-
-    def _initialize_redis_streamer(self):
-        """
-        Initialize Redis image streamer for input images.
-
-        Raises:
-            RedisConnectionError: If Redis connection cannot be established
-                                 and fail_on_redis_error is True in config
-        """
-        try:
-            self._streamer = RedisImageStreamer(stream_name=self._stream_name)
-
-            # Verify connection by attempting a ping
+        # Annotated image streamer
+        if self._publish_annotated:
             try:
-                # Try to access Redis to verify connection
-                self._streamer.client.ping()
-                if self.verbose:
-                    self._logger.info(f"✓ Initialized input streamer: {self._stream_name}")
-            except Exception as ping_error:
-                # Connection test failed
-                redis_error = handle_redis_error(
-                    "connection_test", self._config.redis.host, self._config.redis.port, ping_error
+                self._annotated_streamer = RedisImageStreamer(
+                    host=self._config.redis.host,
+                    port=self._config.redis.port,
+                    password=self._config.redis.password,
+                    ssl=self._config.redis.ssl,
+                    stream_name=self._annotated_stream_name
                 )
-
-                # Check if we should fail hard or continue without Redis
-                fail_on_error = getattr(self._config.redis, "fail_on_error", True)
-
-                if fail_on_error:
-                    # Raise exception to prevent initialization
-                    raise redis_error
-                else:
-                    # Log warning and continue without Redis
-                    if self.verbose:
-                        self._logger.warning(f"Redis connection failed: {redis_error}")
-                    self._streamer = None
-
-        except ImportError as e:
-            error_msg = "redis_robot_comm package not found. " "Install with: pip install redis-robot-comm"
-            if self.verbose:
-                self._logger.error(error_msg)
-            raise DependencyError("redis_robot_comm", "Redis streaming", error_msg) from e
-
-        except RedisConnectionError:
-            # Re-raise Redis connection errors
-            raise
-
-        except Exception as e:
-            redis_error = handle_redis_error("initialization", self._config.redis.host, self._config.redis.port, e)
-
-            fail_on_error = getattr(self._config.redis, "fail_on_error", True)
-
-            if fail_on_error:
-                raise redis_error
-            else:
-                if self.verbose:
-                    self._logger.warning(f"Redis initialization failed: {redis_error}")
-                self._streamer = None
-
-    def _initialize_annotated_streamer(self):
-        """
-        Initialize Redis image streamer for annotated images.
-
-        Note: Failures here are non-critical and will only log warnings
-        """
-        if not self._publish_annotated:
-            self._annotated_streamer = None
-            return
-
-        try:
-            self._annotated_streamer = RedisImageStreamer(stream_name=self._annotated_stream_name)
-
-            # Verify connection
-            try:
                 self._annotated_streamer.client.ping()
-                if self.verbose:
+                if self._verbose:
                     self._logger.info(f"✓ Initialized annotated streamer: {self._annotated_stream_name}")
-            except Exception as ping_error:
-                if self.verbose:
-                    self._logger.warning(f"Annotated streamer connection test failed: {ping_error}")
+            except Exception as e:
+                if self._verbose:
+                    self._logger.warning(f"Annotated streamer initialization failed: {e}")
                 self._annotated_streamer = None
-
-        except Exception as e:
-            redis_error = handle_redis_error("initialization", self._config.redis.host, self._config.redis.port, e)
-            if self.verbose:
-                self._logger.warning(f"Annotated streamer initialization failed: {redis_error}")
+        else:
             self._annotated_streamer = None
 
-    def _setup_annotators(self):
-        """Initialize supervision library annotators."""
+    def _setup_annotators(self) -> None:
+        """Initialize supervision library annotators for image visualization."""
         try:
             annotation_config = self._config.annotation
-
             self._label_annotator = sv.LabelAnnotator(
                 text_position=sv.Position.BOTTOM_CENTER,
                 text_scale=annotation_config.text_scale,
@@ -222,140 +169,95 @@ class VisualCortex:
             )
             self._corner_annotator = sv.BoxCornerAnnotator(thickness=annotation_config.box_thickness)
             self._halo_annotator = sv.HaloAnnotator()
-
         except Exception as e:
             self._logger.warning(f"Annotation setup failed: {e}")
-            # Create minimal annotators as fallback
             self._label_annotator = sv.LabelAnnotator()
             self._corner_annotator = sv.BoxCornerAnnotator()
             self._halo_annotator = sv.HaloAnnotator()
 
-    def _initialize_object_detector(self):
-        """Initialize the object detection model."""
-        object_labels = self._config.get_object_labels()
-
+    def _initialize_object_detector(self) -> None:
+        """Initialize the underlying ObjectDetector backend."""
         self._object_detector = ObjectDetector(
             device=self._device,
             model_id=self._objdetect_model_id,
-            object_labels=object_labels,
-            verbose=self.verbose,
+            object_labels=self._config.get_object_labels(),
+            verbose=self._verbose,
             config=self._config,
             publish_during_movement=self._publish_detections_during_movement,
+            redis_host=self._config.redis.host,
+            redis_port=self._config.redis.port
         )
 
+    @retry_with_backoff(max_attempts=3, exceptions=(Exception,))
     def detect_objects_from_redis(self) -> bool:
         """
-        Manually trigger object detection from latest Redis image.
+        Manually trigger object detection from latest image in Redis.
 
         Returns:
             bool: True if detection was successful, False otherwise
         """
         if self._streamer is None:
-            if self.verbose:
-                self._logger.error("Redis streamer not available")
             return False
 
         try:
-            result = self._streamer.get_latest_image()
+            result = self._redis_circuit_breaker.call(self._streamer.get_latest_image)
             if not result:
-                if self.verbose:
-                    self._logger.info("No image available from Redis")
                 return False
 
             image, metadata = result
-
-            self.process_image_callback(image, metadata, None)
+            self.process_image_callback(image, metadata)
             return True
-
-        except ImageProcessingError as e:
-            if self.verbose:
-                self._logger.error(f"Image processing error: {e}")
+        except CircuitBreakerOpenError as e:
+            if self._verbose:
+                self._logger.warning(f"Circuit breaker open: {e}")
             return False
         except Exception as e:
-            if self.verbose:
+            if self._verbose:
                 self._logger.error(f"Error in manual detection: {e}")
             return False
 
-    def process_image_callback(self, image: np.ndarray, metadata: Dict[str, Any], image_info: Optional[Dict[str, Any]] = None):
+    def process_image_callback(self, image: np.ndarray, metadata: Dict[str, Any], image_info: Optional[Dict[str, Any]] = None) -> None:
         """
         Process incoming images from Redis stream.
 
         Args:
-            image: Input image
+            image: Input image in BGR format
             metadata: Image metadata from Redis
             image_info: Optional image dimension info
         """
-        workspace_id = metadata.get("workspace_id", "unknown")
-        frame_id = metadata.get("frame_id", self._processed_frames)
-
-        is_moving = metadata.get("is_moving", False)
-        robot_moving = metadata.get("robot_moving", False)
-
         try:
-            # Validate input image
             validate_image(image)
-
-            if self.verbose and image_info:
-                width, height = image_info["width"], image_info["height"]
-                movement_status = " (MOVING)" if (is_moving or robot_moving) else ""
-                self._logger.info(f"Processing frame {frame_id}: {width}x{height} " f"from {workspace_id}{movement_status}")
-
-            # Store current image
             self._img_work = image
 
-            # Convert to RGB for detection models
+            # Convert to RGB for models
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-            # Run detection with timing
-            with Timer("Object detection", self._logger if self.verbose else None):
-                detected_objects = self._run_detection(image_rgb)
+            # Detection
+            with Timer("Object detection", self._logger if self._verbose else None):
+                detected_objects = self._object_detector.detect_objects(image_rgb, metadata=metadata)
 
-            # Create annotated frame with timing
-            with Timer("Annotation", self._logger if self.verbose else None):
+            # Annotation
+            with Timer("Annotation", self._logger if self._verbose else None):
                 self._create_annotated_frame(detected_objects)
 
-            # Publish annotated frame to Redis
+            # Publishing
             if self._publish_annotated and self._annotated_frame is not None:
-                self._publish_annotated_frame(metadata, frame_id)
+                self._publish_annotated_frame(metadata, metadata.get("frame_id", self._processed_frames))
 
-            # Update state
+            # State update
             self._detected_objects = detected_objects
             self._processed_frames += 1
 
-            if self.verbose:
-                if detected_objects:
-                    publish_status = ""
-                    if not self._publish_detections_during_movement and (is_moving or robot_moving):
-                        publish_status = " (not published - robot moving)"
-
-                    self._logger.info(f"Found {len(detected_objects)} objects{publish_status}")
-                    if self.verbose:  # Extra detail in verbose mode
-                        summary = format_detection_results(detected_objects, max_items=5)
-                        self._logger.debug(summary)
-                else:
-                    self._logger.info("No objects detected")
-
-        except ImageProcessingError as e:
-            if self.verbose:
-                self._logger.error(f"Image processing failed: {e}")
         except Exception as e:
-            detection_error = handle_detection_error(e, image.shape, self._objdetect_model_id)
-            if self.verbose:
-                self._logger.error(str(detection_error))
+            if self._verbose:
+                self._logger.error(f"Image processing failed: {e}")
 
-    def _publish_annotated_frame(self, original_metadata: Dict[str, Any], frame_id: int):
-        """
-        Publish annotated frame to Redis.
-
-        Args:
-            original_metadata: Metadata from the original image
-            frame_id: Frame identifier
-        """
-        if self._annotated_streamer is None:
+    def _publish_annotated_frame(self, original_metadata: Dict[str, Any], frame_id: int) -> None:
+        """Publish annotated frame to Redis."""
+        if self._annotated_streamer is None or self._annotated_frame is None:
             return
 
         try:
-            # Create metadata for annotated frame
             annotated_metadata = {
                 **original_metadata,
                 "frame_id": frame_id,
@@ -363,430 +265,141 @@ class VisualCortex:
                 "detection_count": len(self._detected_objects),
                 "model_id": self._objdetect_model_id,
             }
-
-            is_moving = (
-                original_metadata.get("is_moving", False)
-                or original_metadata.get("robot_moving", False)
-                or original_metadata.get("camera_moving", False)
+            self._redis_circuit_breaker.call(
+                self._annotated_streamer.publish_image,
+                self._annotated_frame,
+                metadata=annotated_metadata,
+                compress_jpeg=True,
+                quality=85,
+                maxlen=10
             )
-
-            annotated_metadata["detections_published"] = self._publish_detections_during_movement or not is_moving
-
-            # Publish to Redis
-            with Timer("Publishing annotated frame", self._logger if self.verbose else None):
-                stream_id = self._annotated_streamer.publish_image(
-                    self._annotated_frame, metadata=annotated_metadata, compress_jpeg=True, quality=85, maxlen=10
-                )
-
-            if self.verbose:
-                movement_note = " (robot moving)" if is_moving else ""
-                self._logger.debug(f"Published annotated frame {frame_id} to Redis{movement_note}: {stream_id}")
-
         except Exception as e:
-            redis_error = handle_redis_error("publish", self._config.redis.host, self._config.redis.port, e)
-            if self.verbose:
-                self._logger.warning(f"Failed to publish annotated frame: {redis_error}")
+            if self._verbose:
+                self._logger.warning(f"Failed to publish annotated frame: {e}")
 
-    def set_publish_detections_during_movement(self, enable: bool):
+    def cleanup(self, force: bool = False) -> None:
         """
-        Enable or disable publishing detections during robot movement.
-        Annotated frames are always published regardless of this setting.
+        Cleanup resources, stop threads and clear memory.
 
         Args:
-            enable: Whether to publish detections when robot is moving
+            force: Whether to forcefully stop threads if they don't terminate gracefully.
         """
-        self._publish_detections_during_movement = enable
-
-        if self._object_detector:
-            self._object_detector.set_publish_during_movement(enable)
-
-        if self.verbose:
-            status = "enabled" if enable else "disabled"
-            self._logger.info(f"Publishing detections during movement {status}")
-
-    def add_detectable_object(self, object_name: str):
-        """
-        Add a new object type to the detectable objects list and publish to Redis.
-
-        Args:
-            object_name: Name of the object to add
-        """
-        if self._object_detector:
-            self._object_detector.add_label(object_name)
-
-            # Publish updated labels to Redis
-            self._publish_current_labels()
-
-            if self.verbose:
-                self._logger.info(f"Added new detectable object: {object_name}")
-
-    def enable_annotated_publishing(self, enable: bool = True):
-        """
-        Enable or disable publishing of annotated frames to Redis.
-
-        Args:
-            enable: Whether to enable annotated frame publishing
-        """
-        self._publish_annotated = enable
-        if enable and self._annotated_streamer is None:
-            self._initialize_annotated_streamer()
-        if self.verbose:
-            status = "enabled" if enable else "disabled"
-            self._logger.info(f"Annotated frame publishing {status}")
-
-    # Properties with proper encapsulation
-    def get_current_image(self, resize: bool = True) -> Optional[np.ndarray]:
-        """
-        Get current raw image.
-
-        Args:
-            resize: Whether to resize small images
-
-        Returns:
-            Current image or None if no image available
-        """
-        if self._img_work is None:
-            return None
-
-        if resize and self._img_work.shape[0] < 640:
-            try:
-                resized, _, _ = resize_image(self._img_work, scale_factor=self._config.annotation.resize_scale_factor)
-                return resized
-            except ImageProcessingError as e:
-                if self.verbose:
-                    self._logger.warning(f"Image resize failed: {e}")
-                return self._img_work
-
-        return self._img_work
-
-    def get_annotated_image(self) -> Optional[np.ndarray]:
-        """Get current annotated image."""
-        return self._annotated_frame
-
-    def get_detected_objects(self) -> List[Dict]:
-        """Get list of detected objects (returns copy to prevent external modification)."""
-        return copy.deepcopy(self._detected_objects)
-
-    def get_object_labels(self) -> List[List[str]]:
-        """Get list of detectable object labels."""
-        if self._object_detector:
-            return self._object_detector.get_object_labels()
-        return [[]]
-
-    def get_processed_frames_count(self) -> int:
-        """Get number of processed frames."""
-        return self._processed_frames
-
-    def get_device(self) -> str:
-        """Get current computation device."""
-        return self._device
-
-    def get_annotated_stream_name(self) -> str:
-        """Get the name of the annotated image stream."""
-        return self._annotated_stream_name
-
-    def is_annotated_publishing_enabled(self) -> bool:
-        """Check if annotated frame publishing is enabled."""
-        return self._publish_annotated and self._annotated_streamer is not None
-
-    # Private methods
-    def _run_detection(self, image_rgb: np.ndarray, metadata: Optional[Dict[str, Any]] = None) -> List[Dict]:
-        """
-        Run object detection on RGB image.
-
-        Args:
-            image_rgb: Input image in RGB format (required for detection models)
-            metadata: Image metadata containing robot state
-        """
-        if image_rgb is None or self._object_detector is None:
-            return []
-
-        try:
-            return self._object_detector.detect_objects(image_rgb, metadata=metadata)
-        except Exception as e:
-            if self.verbose:
-                self._logger.error(f"Detection failed: {e}")
-            return []
-
-    def _create_annotated_frame(self, detected_objects: List[Dict]):
-        """Create annotated version of current image."""
-        if self._img_work is None:
-            self._annotated_frame = None
-            return
-
-        try:
-            if not detected_objects or self._object_detector is None:
-                # No detections, just resize the image
-                self._annotated_frame, _, _ = resize_image(
-                    self._img_work.copy(), scale_factor=self._config.annotation.resize_scale_factor
-                )
-                return
-
-            detections = self._object_detector.get_detections()
-            if detections is None:
-                self._annotated_frame = self._img_work.copy()
-                return
-
-            # Start with base image
-            annotated_frame = self._img_work.copy()
-
-            # Apply halo annotation if masks are available
-            if hasattr(detections, "mask") and detections.mask is not None and len(detections.mask) > 0:
-                try:
-                    annotated_frame = self._halo_annotator.annotate(scene=annotated_frame, detections=detections)
-                except Exception as e:
-                    if self.verbose:
-                        self._logger.warning(f"Halo annotation failed: {e}")
-
-            # Resize for display
-            resized_frame, scale_x, scale_y = resize_image(
-                annotated_frame, scale_factor=self._config.annotation.resize_scale_factor
-            )
-
-            # Scale detection coordinates for display
-            scaled_detections = self._scale_detections(detections, scale_x, scale_y)
-
-            # Add bounding boxes
-            if self._config.annotation.show_labels:
-                try:
-                    resized_frame = self._corner_annotator.annotate(scene=resized_frame, detections=scaled_detections)
-                except Exception as e:
-                    if self.verbose:
-                        self._logger.warning(f"Corner annotation failed: {e}")
-
-            # Add labels
-            if self._config.annotation.show_labels:
-                try:
-                    labels = self._object_detector.get_label_texts()
-                    if labels is not None:
-                        resized_frame = self._label_annotator.annotate(
-                            scene=resized_frame, detections=scaled_detections, labels=labels
-                        )
-                except Exception as e:
-                    if self.verbose:
-                        self._logger.warning(f"Label annotation failed: {e}")
-
-            self._annotated_frame = resized_frame
-
-        except Exception as e:
-            if self.verbose:
-                self._logger.error(f"Annotation creation failed: {e}")
-            # Fallback to original image
-            try:
-                self._annotated_frame, _, _ = resize_image(
-                    self._img_work.copy(), scale_factor=self._config.annotation.resize_scale_factor
-                )
-            except ImageProcessingError:
-                self._annotated_frame = self._img_work.copy()
-
-    def _scale_detections(self, detections: sv.Detections, scale_x: float, scale_y: float) -> sv.Detections:
-        """Scale detection coordinates for resized image."""
-        try:
-            # Create a copy and ensure it's float type to allow multiplication
-            scaled_xyxy = detections.xyxy.astype(np.float64).copy()
-            # scaled_xyxy = copy.deepcopy(detections.xyxy)
-            scaled_xyxy[:, [0, 2]] *= scale_x  # Scale x-coordinates
-            scaled_xyxy[:, [1, 3]] *= scale_y  # Scale y-coordinates
-
-            return sv.Detections(xyxy=scaled_xyxy, confidence=detections.confidence, class_id=detections.class_id)
-        except Exception as e:
-            if self.verbose:
-                self._logger.warning(f"Detection scaling failed: {e}")
-            return detections
-
-    def _publish_current_labels(self):
-        """
-        Publish current detectable object labels to Redis.
-        Should be called on initialization and whenever labels change.
-        """
-        try:
-            object_labels = self._config.get_object_labels()
-
-            print(object_labels)
-
-            if object_labels and len(object_labels) > 0:
-                # Flatten nested list structure
-                labels_flat = object_labels[0] if isinstance(object_labels[0], list) else object_labels
-
-                metadata = {
-                    "model_id": self._objdetect_model_id,
-                    "source": "vision_detect_segment",
-                    "label_count": len(labels_flat),
-                }
-
-                self._label_manager.publish_labels(labels_flat, metadata)
-
-                if self.verbose:
-                    self._logger.info(f"Published {len(labels_flat)} labels to Redis")
-                print(f"Published {len(labels_flat)} labels to Redis")
-
-        except Exception as e:
-            if self.verbose:
-                self._logger.error(f"Failed to publish labels: {e}")
-            print(f"Failed to publish labels: {e}")
-
-    def _start_label_monitoring(self):
-        """
-        Start a background thread that monitors Redis for label updates
-        and updates the object detector accordingly.
-        """
-
-        def monitor_labels():
-            """Background thread function to check for label updates."""
-            if self.verbose:
-                self._logger.info("Starting label monitoring thread")
-
-            last_check_time = time.time()
-            check_interval = 1.0  # Check every second
-
-            while not self._label_monitor_stop.is_set():
-                try:
-                    current_time = time.time()
-
-                    # Only check periodically
-                    if current_time - last_check_time >= check_interval:
-                        # Get latest labels from Redis
-                        try:
-                            new_labels = self._label_manager.get_latest_labels(timeout_seconds=5.0)
-                        except Exception as e:
-                            # Handle case where label_manager is mocked or unavailable
-                            if self.verbose:
-                                self._logger.debug(f"Label manager unavailable: {e}")
-                            new_labels = None
-
-                        if new_labels is not None:
-                            # Get current labels
-                            current_labels = self.get_object_labels()
-                            current_labels_flat = current_labels[0] if current_labels else []
-
-                            # Check if labels have changed
-                            if set(new_labels) != set(current_labels_flat):
-                                if self.verbose:
-                                    self._logger.info("Label update detected, updating detector")
-
-                                # Update detector with new labels
-                                self._update_detector_labels(new_labels)
-
-                        last_check_time = current_time
-
-                    # Sleep briefly to avoid busy waiting
-                    time.sleep(0.1)
-
-                except Exception as e:
-                    if self.verbose:
-                        self._logger.error(f"Error in label monitoring: {e}")
-                    time.sleep(1.0)  # Wait longer on error
-
-            if self.verbose:
-                self._logger.info("Label monitoring thread stopped")
-
-        self._label_monitor_thread = threading.Thread(target=monitor_labels, daemon=True)
-        self._label_monitor_thread.start()
-
-    def _update_detector_labels(self, new_labels: list):
-        """
-        Update the object detector with new labels.
-
-        Args:
-            new_labels: List of new label strings
-        """
-        try:
-            # Update config
-            self._config.set_object_labels(new_labels)
-
-            # Update detector
-            if self._object_detector:
-                # Clear existing labels and add new ones
-                for label in new_labels:
-                    self._object_detector.add_label(label)
-
-                if self.verbose:
-                    self._logger.info(f"Updated detector with {len(new_labels)} labels")
-
-        except Exception as e:
-            if self.verbose:
-                self._logger.error(f"Failed to update detector labels: {e}")
-
-    # Utility methods
-    def clear_cache(self):
-        """Clear GPU cache and reset internal state."""
-        clear_gpu_cache()
-        if self.verbose:
-            self._logger.info("GPU cache cleared")
-
-    def cleanup(self):
-        """
-        Cleanup method to stop background threads.
-        """
-        if self._label_monitor_thread:
+        if self._label_monitor_thread and self._label_monitor_thread.is_alive():
             self._label_monitor_stop.set()
             self._label_monitor_thread.join(timeout=2.0)
+            if self._label_monitor_thread.is_alive() and force:
+                self._logger.warning("Label monitor thread did not stop gracefully")
 
-        # FIX: Clear large objects to prevent memory accumulation
         self._img_work = None
         self._annotated_frame = None
         self._detected_objects = []
 
-        # Clear GPU cache if available
         if self._device == "cuda":
             clear_gpu_cache()
 
-    def get_memory_usage(self) -> Dict[str, Any]:
-        """Get current memory usage information."""
+        gc.collect()
+        if self._verbose:
+            self._logger.info("VisualCortex resources cleaned up")
+
+    def __del__(self):
+        """Ensure cleanup on deletion."""
         try:
-            from .utils import get_memory_usage
+            self.cleanup(force=True)
+        except:
+            pass
 
-            return get_memory_usage()
+    # Public API methods
+    def get_current_image(self, resize: bool = True) -> Optional[np.ndarray]:
+        """Get current raw image, optionally resized."""
+        if self._img_work is None:
+            return None
+        if resize and self._img_work.shape[0] < 640:
+            resized, _, _ = resize_image(self._img_work, scale_factor=self._config.annotation.resize_scale_factor)
+            return resized
+        return self._img_work
+
+    def get_annotated_image(self) -> Optional[np.ndarray]:
+        return self._annotated_frame
+
+    def get_detected_objects(self) -> List[Dict[str, Any]]:
+        return copy.deepcopy(self._detected_objects)
+
+    def add_detectable_object(self, object_name: str) -> None:
+        """Add a new detectable object and sync with Redis."""
+        self._object_detector.add_label(object_name)
+        self._publish_current_labels()
+
+    def _create_annotated_frame(self, detected_objects: List[Dict[str, Any]]) -> None:
+        """Apply all annotations to the current working image."""
+        if self._img_work is None:
+            return
+
+        detections = self._object_detector.get_detections()
+        if not detected_objects or detections is None:
+            self._annotated_frame, _, _ = resize_image(self._img_work.copy(), scale_factor=self._config.annotation.resize_scale_factor)
+            return
+
+        annotated_frame = self._img_work.copy()
+
+        # Halo for masks
+        if hasattr(detections, "mask") and detections.mask is not None and len(detections.mask) > 0:
+            annotated_frame = self._halo_annotator.annotate(scene=annotated_frame, detections=detections)
+
+        # Resize for display
+        resized_frame, scale_x, scale_y = resize_image(annotated_frame, scale_factor=self._config.annotation.resize_scale_factor)
+
+        # Coordinate scaling
+        scaled_xyxy = detections.xyxy.astype(np.float64) * [scale_x, scale_y, scale_x, scale_y]
+        scaled_detections = sv.Detections(xyxy=scaled_xyxy, confidence=detections.confidence, class_id=detections.class_id, tracker_id=getattr(detections, 'tracker_id', None))
+
+        # Boxes and Labels
+        if self._config.annotation.show_labels:
+            resized_frame = self._corner_annotator.annotate(scene=resized_frame, detections=scaled_detections)
+            labels = self._object_detector.get_label_texts()
+            if labels is not None:
+                resized_frame = self._label_annotator.annotate(scene=resized_frame, detections=scaled_detections, labels=labels)
+
+        self._annotated_frame = resized_frame
+
+    def _publish_current_labels(self) -> None:
+        """Sync current labels with Redis."""
+        try:
+            labels = self._config.get_object_labels()[0]
+            self._label_manager.publish_labels(labels, {"model_id": self._objdetect_model_id})
         except Exception as e:
-            if self.verbose:
-                self._logger.warning(f"Could not get memory usage: {e}")
-            return {}
+            if self._verbose:
+                self._logger.error(f"Failed to publish labels: {e}")
 
-    def get_stats(self) -> Dict[str, Any]:
-        """Get processing statistics."""
-        return {
-            "processed_frames": self._processed_frames,
-            "device": self._device,
-            "model_id": self._objdetect_model_id,
-            "has_current_image": self._img_work is not None,
-            "current_detections_count": len(self._detected_objects),
-            "redis_available": self._streamer is not None,
-            "annotated_streamer_available": self._annotated_streamer is not None,
-            "annotated_publishing_enabled": self._publish_annotated,
-            "detector_available": self._object_detector is not None,
-        }
+    def _start_label_monitoring(self) -> None:
+        """Start thread to monitor label changes from Redis."""
+        def monitor_labels():
+            last_check = 0
+            while not self._label_monitor_stop.is_set():
+                if time.time() - last_check > 1.0:
+                    try:
+                        new_labels = self._label_manager.get_latest_labels(timeout_seconds=1.0)
+                        if new_labels:
+                            current = self._config.get_object_labels()[0]
+                            if set(new_labels) != set(current):
+                                self._update_detector_labels(new_labels)
+                    except:
+                        pass
+                    last_check = time.time()
+                time.sleep(0.1)
 
-    # Property compatibility methods (for backward compatibility)
+        self._label_monitor_thread = threading.Thread(target=monitor_labels, daemon=True)
+        self._label_monitor_thread.start()
+
+    def _update_detector_labels(self, labels: List[str]) -> None:
+        self._config.set_object_labels(labels)
+        self._object_detector.add_label(labels[-1]) # Simplified for now
+
+    # Properties and compatibility
     @property
-    def current_image(self) -> Optional[np.ndarray]:
-        """Get current raw image."""
-        return self.get_current_image()
-
+    def current_image(self): return self.get_current_image()
     @property
-    def annotated_image(self) -> Optional[np.ndarray]:
-        """Get current annotated image."""
-        return self.get_annotated_image()
-
+    def annotated_image(self): return self.get_annotated_image()
     @property
-    def detected_objects(self) -> List[Dict]:
-        """Get list of detected objects."""
-        return self.get_detected_objects()
-
+    def detected_objects(self): return self.get_detected_objects()
     @property
-    def object_labels(self) -> List[List[str]]:
-        """Get list of detectable object labels."""
-        return self.get_object_labels()
-
-    @property
-    def processed_frames(self) -> int:
-        """Get number of processed frames."""
-        return self._processed_frames
-
-    # Deprecated methods for backward compatibility
-    def img_work(self, resize: bool = True) -> Optional[np.ndarray]:
-        """Deprecated: use get_current_image() instead."""
-        return self.get_current_image(resize)
-
-    def annotated_frame(self) -> Optional[np.ndarray]:
-        """Deprecated: use get_annotated_image() instead."""
-        return self.get_annotated_image()
+    def processed_frames(self): return self._processed_frames
