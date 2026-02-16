@@ -1,61 +1,83 @@
-import numpy as np
-import time
 import base64
 import os
-from typing import List, Dict, Optional, Tuple, Union, Any
-import torch
-import supervision as sv
+import time
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
+import numpy as np
+import supervision as sv
+import torch
+
+try:
+    from redis_robot_comm import RedisMessageBroker
+except ImportError:
+    RedisMessageBroker = None
+
+from ..utils.config import VisionConfig
+from ..utils.exceptions import (
+    ModelLoadError,
+    handle_detection_error,
+    handle_model_loading_error,
+    handle_redis_error,
+)
+from ..utils.utils import (
+    Timer,
+    get_optimal_device,
+    setup_logging,
+    validate_confidence_threshold,
+)
+from .detectors.owlv2 import GroundingDinoBackend, Owlv2Backend
+from .detectors.yolo import YOLOWorldBackend
+from .detectors.yoloe import YOLOEBackend
 from .object_segmenter import ObjectSegmenter
 from .object_tracker import ObjectTracker
 
-from redis_robot_comm import RedisMessageBroker
-
-from ..utils.config import VisionConfig, MODEL_CONFIGS
-from ..utils.exceptions import (
-    ModelLoadError,
-    DependencyError,
-    handle_model_loading_error,
-    handle_detection_error,
-    handle_redis_error,
-)
-from ..utils.utils import setup_logging, validate_model_requirements, get_optimal_device, Timer, validate_confidence_threshold
-
-# Handle optional dependencies gracefully
+# Handle optional dependencies gracefully for backward compatibility and tests
 try:
     from ultralytics import YOLO
 
     YOLO_AVAILABLE = True
-except (ModuleNotFoundError, ImportError) as e:
-    print(f"YOLO not available: {e}")
+except (ModuleNotFoundError, ImportError):
+    YOLO = None
     YOLO_AVAILABLE = False
 
 try:
     from ultralytics import YOLOE
 
     YOLOE_AVAILABLE = True
-except (ModuleNotFoundError, ImportError) as e:
-    print(f"YOLOE not available: {e}")
+except (ModuleNotFoundError, ImportError):
+    YOLOE = None
     YOLOE_AVAILABLE = False
 
 try:
-    from transformers import Owlv2Processor, Owlv2ForObjectDetection, AutoProcessor, AutoModelForZeroShotObjectDetection
+    from transformers import (
+        AutoModelForZeroShotObjectDetection,
+        AutoProcessor,
+        Owlv2ForObjectDetection,
+        Owlv2Processor,
+    )
 
     TRANSFORMERS_AVAILABLE = True
-except (ModuleNotFoundError, ImportError) as e:
-    print(f"Transformers not available: {e}")
+except (ModuleNotFoundError, ImportError):
+    Owlv2Processor = None
+    Owlv2ForObjectDetection = None
+    AutoProcessor = None
+    AutoModelForZeroShotObjectDetection = None
     TRANSFORMERS_AVAILABLE = False
 
 
 class ObjectDetector:
     """
-    Unified object detection class supporting multiple model backends.
+    Unified object detection class supporting multiple model backends via Strategy Pattern.
+
+    This class provides a common interface for different object detection models,
+    handling model loading, inference, tracking coordination, and result publishing.
 
     Supports:
     - OWL-V2 (Open-vocabulary detection)
     - Grounding-DINO (Text-guided detection)
     - YOLO-World (Real-time detection)
+    - YOLOE (Unified Detection & Segmentation)
     """
 
     def __init__(
@@ -75,8 +97,8 @@ class ObjectDetector:
         Initialize ObjectDetector.
 
         Args:
-            device: Computation device ("cuda" or "cpu")
-            model_id: Model identifier (owlv2, grounding_dino, yolo-world)
+            device: Computation device ("cuda", "cpu", or "auto")
+            model_id: Model identifier (e.g., "owlv2", "yoloe-11s")
             object_labels: Nested list of object labels to detect
             redis_host: Redis server host
             redis_port: Redis server port
@@ -90,57 +112,43 @@ class ObjectDetector:
         self._device = get_optimal_device(prefer_gpu=(device != "cpu"))
         self._model_id = model_id
         self._object_labels = object_labels
-        self._processed_labels = None
-        self._model = None
-        self._processor = None
-        self._current_detections = None
-        self._current_labels = None
+        self._current_detections: Optional[sv.Detections] = None
+        self._current_labels: Optional[np.ndarray] = None
         self._redis_host = redis_host
         self._redis_port = redis_port
         self._stream_name = stream_name
         self._publish_during_movement = publish_during_movement
+        self._verbose = verbose
 
         # Public configuration
-        self.verbose = verbose
         self._config = config or VisionConfig()
 
         log_filename = os.path.join("log", f'object_detector_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
         # Setup logging
         self._logger = setup_logging(verbose, log_filename)
 
-        # Validate dependencies and load model
         try:
-            self._validate_model_availability()
-            validate_model_requirements(model_id)
+            # Factory for backend
+            self._backend = self._create_backend(model_id, self._device, object_labels[0])
 
-            # Preprocess labels based on model requirements
-            self._processed_labels = ObjectDetector._preprocess_labels(object_labels, model_id)
-
-            # Load model with timing
             with Timer(f"Loading {model_id} model", self._logger):
-                self._model, self._processor = self._load_model(model_id)
+                self._backend.load_model()
 
             # Initialize segmenter
             self._segmenter = ObjectSegmenter(device=self._device, verbose=verbose)
 
+            # Initialize tracker
             self._tracker = ObjectTracker(
-                model=self._model, model_id=self._model_id, enable_tracking=enable_tracking, verbose=self.verbose
+                model=getattr(self._backend, "model", None),
+                model_id=self._model_id,
+                enable_tracking=enable_tracking,
+                verbose=self._verbose,
             )
 
             # Initialize Redis broker
-            try:
-                self._redis_broker = RedisMessageBroker(redis_host, redis_port)
+            self._setup_redis(redis_host, redis_port)
 
-                self._redis_broker.client.xtrim("detected_objects", maxlen=100, approximate=True)
-
-                print(f"Stream info: {self._redis_broker.get_stream_info()}")
-            except Exception as e:
-                redis_error = handle_redis_error("connection", redis_host, redis_port, e)
-                if verbose:
-                    self._logger.warning(f"Redis initialization failed: {redis_error}")
-                self._redis_broker = None
-
-            if verbose:
+            if self._verbose:
                 self._logger.info(f"ObjectDetector initialized with {model_id} on {self._device}")
 
         except Exception as e:
@@ -148,41 +156,61 @@ class ObjectDetector:
             self._logger.error(str(model_error))
             raise model_error
 
-    def _validate_model_availability(self):
-        """Check if required dependencies are available for the selected model."""
-        if "yoloe" in self._model_id.lower() and not YOLOE_AVAILABLE:
-            raise DependencyError(
-                "ultralytics (with YOLOE support)",
-                f"model {self._model_id}",
-                "Install with: pip install -U ultralytics>=8.3.0",
-            )
-        elif self._model_id == "yolo-world" and not YOLO_AVAILABLE:
-            raise DependencyError("ultralytics", f"model {self._model_id}", "Install with: pip install ultralytics")
-        elif self._model_id in ["owlv2", "grounding_dino"] and not TRANSFORMERS_AVAILABLE:
-            raise DependencyError("transformers", f"model {self._model_id}", "Install with: pip install transformers")
-        elif self._model_id not in MODEL_CONFIGS:
-            available = list(MODEL_CONFIGS.keys())
-            raise ModelLoadError(self._model_id, f"Unsupported model. Available: {available}")
+    def _create_backend(self, model_id: str, device: str, labels: List[str]):
+        """
+        Factory method to create the appropriate backend.
 
-    @staticmethod
-    def _preprocess_labels(labels: List[List[str]], model_id: str) -> Union[List[List[str]], str]:
-        """Preprocess labels based on model requirements."""
-        if model_id == "grounding_dino":
-            # Grounding DINO needs lowercase labels joined with periods
-            flat_labels = [label.lower() for label in labels[0]]
-            return ". ".join(flat_labels) + "."
-        return labels
+        Args:
+            model_id: Identifier of the model
+            device: Computing device
+            labels: List of labels
+
+        Returns:
+            An instance of DetectionBackend
+        """
+        if model_id == "owlv2":
+            return Owlv2Backend(model_id, device, labels)
+        elif model_id == "grounding_dino":
+            return GroundingDinoBackend(model_id, device, labels)
+        elif model_id == "yolo-world":
+            return YOLOWorldBackend(model_id, device, labels)
+        elif "yoloe" in model_id.lower():
+            return YOLOEBackend(model_id, device, labels)
+        else:
+            raise ModelLoadError(model_id, f"Unsupported model ID: {model_id}")
+
+    def _setup_redis(self, host: str, port: int) -> None:
+        """
+        Initialize Redis connection.
+
+        Args:
+            host: Redis host
+            port: Redis port
+        """
+        if RedisMessageBroker is None:
+            if self._verbose:
+                self._logger.warning("RedisMessageBroker not available")
+            self._redis_broker = None
+            return
+
+        try:
+            self._redis_broker = RedisMessageBroker(host, port)
+            self._redis_broker.client.xtrim(self._stream_name, maxlen=100, approximate=True)
+        except Exception as e:
+            redis_error = handle_redis_error("connection", host, port, e)
+            if self._verbose:
+                self._logger.warning(f"Redis initialization failed: {redis_error}")
+            self._redis_broker = None
 
     def detect_objects(
         self, image: np.ndarray, confidence_threshold: Optional[float] = None, metadata: Optional[Dict[str, Any]] = None
-    ) -> List[Dict]:
+    ) -> List[Dict[str, Any]]:
         """
         Run object detection or tracking on the given image.
-        Returns a list of detections, optionally with track IDs.
 
         Args:
             image: Input image as numpy array in RGB format
-            confidence_threshold: Minimum confidence for detections
+            confidence_threshold: Minimum confidence for detections (overrides config)
             metadata: Optional metadata containing robot state (e.g., is_moving)
 
         Returns:
@@ -194,28 +222,157 @@ class ObjectDetector:
         threshold = confidence_threshold or self._config.model.confidence_threshold
 
         try:
-            with Timer("Object detection", self._logger if self.verbose else None):
-                if "yoloe" in self._model_id.lower():
-                    detected_objects = self._detect_yoloe(image, threshold)
-                elif self._model_id == "yolo-world":
-                    detected_objects = self._detect_yolo(image, threshold)
-                else:
-                    detected_objects = self._detect_transformer_based(image, threshold)
+            with Timer("Object detection", self._logger if self._verbose else None):
+                # Delegate detection to backend strategy
+                detected_objects = self._backend.detect(image, threshold)
 
-                # NEW: Conditionally publish based on robot movement
-                should_publish = self._should_publish_detections(metadata)
-                if should_publish:
+                # Post-process for tracking if enabled
+                track_ids = self._handle_tracking(detected_objects)
+
+                # Apply label stabilization based on history
+                detected_objects = self._apply_label_stabilization(detected_objects, track_ids)
+
+                # Add segmentation masks
+                detected_objects = self._handle_segmentation(detected_objects, image)
+
+                # Update internal state for annotation tools
+                self._update_supervision_state(detected_objects, track_ids)
+
+                # Conditionally publish based on movement
+                if self._should_publish_detections(metadata):
                     self._publish_detections(detected_objects, self._model_id)
-                elif self.verbose:
+                elif self._verbose:
                     self._logger.info("Skipping detection publishing - robot is moving")
 
                 return detected_objects
         except Exception as e:
             detection_error = handle_detection_error(e, image.shape, self._model_id)
-            print(detection_error)
-            if self.verbose:
+            if self._verbose:
                 self._logger.error(str(detection_error))
             return []
+
+    def _handle_tracking(self, detected_objects: List[Dict[str, Any]]) -> Optional[np.ndarray]:
+        """Handle tracking logic for both built-in and external trackers."""
+        if not self._tracker or not self._tracker.enable_tracking:
+            return None
+
+        track_ids = None
+        if not self._backend.supports_tracking:
+            # Use ByteTrack for models without built-in tracking
+            boxes = np.array(
+                [
+                    [obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]]
+                    for obj in detected_objects
+                ]
+            )
+            scores = np.array([obj["confidence"] for obj in detected_objects])
+            if len(boxes) > 0:
+                detections = sv.Detections(xyxy=boxes, confidence=scores, class_id=np.zeros(len(boxes), dtype=int))
+                tracked_detections = self._tracker.update_with_detections(detections)
+                track_ids = tracked_detections.tracker_id
+
+                for i, obj in enumerate(detected_objects):
+                    if i < len(track_ids):
+                        obj["track_id"] = int(track_ids[i])
+        else:
+            # Backend handled tracking, extract track IDs
+            track_ids = np.array([obj["track_id"] for obj in detected_objects if "track_id" in obj])
+            if len(track_ids) == 0:
+                track_ids = None
+
+        return track_ids
+
+    def _handle_segmentation(self, detected_objects: List[Dict[str, Any]], image: np.ndarray) -> List[Dict[str, Any]]:
+        """Coordinate segmentation between backend and external segmenter."""
+        if not self._config.enable_segmentation:
+            return detected_objects
+
+        if self._backend.supports_segmentation:
+            # Process masks already provided by backend
+            for obj in detected_objects:
+                if "mask_8u" in obj:
+                    obj["mask_data"] = self._serialize_mask(obj["mask_8u"])
+                    obj["mask_shape"] = list(obj["mask_8u"].shape)
+                    obj["mask_dtype"] = str(obj["mask_8u"].dtype)
+                    obj["has_mask"] = True
+                    del obj["mask_8u"]
+        else:
+            # Use external segmenter (SAM/FastSAM)
+            if detected_objects:
+                boxes = torch.tensor(
+                    [
+                        [obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]]
+                        for obj in detected_objects
+                    ]
+                )
+                detected_objects = self._add_segmentation(detected_objects, image, boxes)
+
+        return detected_objects
+
+    def _update_supervision_state(self, objects: List[Dict[str, Any]], track_ids: Optional[np.ndarray]) -> None:
+        """Update sv.Detections and labels for annotation."""
+        if not objects:
+            self._current_detections = None
+            self._current_labels = None
+            return
+
+        try:
+            xyxy = np.array(
+                [[obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]] for obj in objects]
+            )
+            confidence = np.array([obj.get("confidence", 0.0) for obj in objects])
+            class_id = np.zeros(len(objects), dtype=int)
+
+            detections = sv.Detections(xyxy=xyxy, confidence=confidence, class_id=class_id)
+            if track_ids is not None and len(track_ids) == len(objects):
+                detections.tracker_id = track_ids
+
+            self._current_detections = detections
+            self._current_labels = np.array([obj["label"] for obj in objects])
+        except (KeyError, TypeError):
+            pass
+
+    def _apply_label_stabilization(
+        self, detected_objects: List[Dict[str, Any]], track_ids: Optional[np.ndarray]
+    ) -> List[Dict[str, Any]]:
+        """Apply label stabilization based on tracking history."""
+        if not self._tracker or not self._tracker.enable_tracking or track_ids is None:
+            return detected_objects
+
+        current_labels = [obj["label"] for obj in detected_objects]
+        stabilized_labels = self._tracker.update_label_history(track_ids, current_labels)
+
+        for obj, stabilized_label in zip(detected_objects, stabilized_labels):
+            obj["label"] = stabilized_label
+
+        lost_tracks = self._tracker.detect_lost_tracks(track_ids)
+        if lost_tracks:
+            self._tracker.cleanup_lost_tracks(lost_tracks)
+
+        return detected_objects
+
+    def _add_segmentation(self, objects: List[Dict[str, Any]], image: np.ndarray, boxes: torch.Tensor) -> List[Dict[str, Any]]:
+        """Add segmentation masks using the external segmenter."""
+        if self._segmenter.get_segmenter() is None:
+            return objects
+
+        for i, (obj, box) in enumerate(zip(objects, boxes)):
+            try:
+                mask_8u, _ = self._segmenter.segment_box_in_image(box, image)
+                if mask_8u is not None:
+                    obj["mask_data"] = self._serialize_mask(mask_8u)
+                    obj["has_mask"] = True
+                    obj["mask_shape"] = list(mask_8u.shape)
+                    obj["mask_dtype"] = str(mask_8u.dtype)
+            except Exception as e:
+                if self._verbose:
+                    self._logger.warning(f"Segmentation failed for object {i}: {e}")
+        return objects
+
+    @staticmethod
+    def _serialize_mask(mask: np.ndarray) -> str:
+        """Serialize numpy mask to base64 string."""
+        return base64.b64encode(mask.tobytes()).decode("utf-8")
 
     def _should_publish_detections(self, metadata: Optional[Dict[str, Any]]) -> bool:
         """
@@ -227,379 +384,30 @@ class ObjectDetector:
         Returns:
             bool: True if detections should be published
         """
-        # If publishing during movement is enabled, always publish
-        if self._publish_during_movement:
+        if self._publish_during_movement or metadata is None:
             return True
 
-        # If no metadata provided, assume robot is stationary (safe default)
-        if metadata is None:
-            return True
+        is_moving = (
+            metadata.get("is_moving", False) or metadata.get("robot_moving", False) or metadata.get("camera_moving", False)
+        )
 
-        # Check for movement indicators in metadata
-        is_moving = metadata.get("is_moving", False)
-        robot_moving = metadata.get("robot_moving", False)
-        camera_moving = metadata.get("camera_moving", False)
-
-        # Don't publish if any movement indicator is True
-        if is_moving or robot_moving or camera_moving:
-            if self.verbose:
-                self._logger.debug(
-                    f"Robot movement detected - skipping detection publishing "
-                    f"(is_moving={is_moving}, robot_moving={robot_moving}, "
-                    f"camera_moving={camera_moving})"
-                )
+        if is_moving and self._verbose:
+            self._logger.debug("Robot movement detected - skipping detection publishing")
             return False
-
         return True
 
-    def _detect_yolo(self, image: np.ndarray, threshold: float) -> List[Dict]:
-        """Run YOLO-World detection with label stabilization."""
-        if self._tracker and self._tracker._use_yolo_tracker:
-            results = self._tracker.track(image, threshold)
-        else:
-            results = self._model.predict(image, conf=threshold, max_det=20, verbose=False)
-
-        detected_objects = []
-        boxes = results[0].boxes
-
-        if boxes is None:
-            return detected_objects
-
-        for i, box in enumerate(boxes):
-            cls = int(boxes.cls[i])
-            class_name = results[0].names[cls]
-            confidence = float(boxes.conf[i])
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-
-            obj_dict = {
-                "label": class_name,
-                "confidence": confidence,
-                "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
-                "has_mask": False,
-            }
-            detected_objects.append(obj_dict)
-
-        # Extract track IDs - FIXED: Handle both tensor and numpy array
-        track_ids = None
-        if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
-            raw_ids = results[0].boxes.id
-
-            # Convert to numpy array if it's a tensor
-            if isinstance(raw_ids, torch.Tensor):
-                track_ids = raw_ids.cpu().numpy().astype(int)
-            elif isinstance(raw_ids, np.ndarray):
-                track_ids = raw_ids.astype(int)
-            else:
-                # Try to convert to numpy array
-                track_ids = np.array(raw_ids, dtype=int)
-
-            if self.verbose:
-                print(f"object_detector track_ids: {track_ids}")
-
-            # Add track IDs to objects
-            for i, obj in enumerate(detected_objects):
-                if i < len(track_ids):
-                    obj["track_id"] = int(track_ids[i])
-
-        # ✅ Apply label stabilization
-        detected_objects = self._apply_label_stabilization(detected_objects, track_ids)
-
-        # Update supervision detections
-        self._create_supervision_detections(results, detected_objects, track_ids)
-
-        # Publish to Redis
-        # self._publish_detections(detected_objects, "yolo-world")
-
-        return detected_objects
-
-    def _detect_yoloe(self, image: np.ndarray, threshold: float) -> List[Dict]:
-        """
-        Run YOLOE detection and segmentation.
-
-        YOLOE performs both detection and segmentation in one pass.
-        It supports tracking and has built-in segmentation capabilities.
-        """
-        # YOLOE supports tracking similar to YOLO-World
-        if self._tracker and self._tracker._use_yolo_tracker:
-            results = self._tracker.track(image, threshold)
-        else:
-            results = self._model.predict(image, conf=threshold, max_det=20, verbose=False)
-
-        detected_objects = []
-        boxes = results[0].boxes
-
-        if boxes is None:
-            return detected_objects
-
-        # Extract detection information
-        for i, box in enumerate(boxes):
-            cls = int(boxes.cls[i])
-            class_name = results[0].names[cls]
-            confidence = float(boxes.conf[i])
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-
-            obj_dict = {
-                "label": class_name,
-                "confidence": confidence,
-                "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
-                "has_mask": False,
-            }
-
-            # Add track ID if available
-            if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
-                track_id = int(results[0].boxes.id[i])
-                obj_dict["track_id"] = track_id
-
-            detected_objects.append(obj_dict)
-
-        # Extract track IDs
-        track_ids = None
-        if hasattr(results[0].boxes, "id") and results[0].boxes.id is not None:
-            track_ids = results[0].boxes.id.cpu().numpy().astype(int)
-
-        # ✅ Apply label stabilization
-        detected_objects = self._apply_label_stabilization(detected_objects, track_ids)
-
-        # Handle segmentation masks (YOLOE has built-in segmentation)
-        if hasattr(results[0], "masks") and results[0].masks is not None:
-            masks_data = results[0].masks.data
-
-            for i, obj in enumerate(detected_objects):
-                if i < len(masks_data):
-                    mask = masks_data[i].cpu().numpy()
-                    mask_8u = (mask * 255).astype(np.uint8)
-
-                    obj["mask_data"] = self._serialize_mask(mask_8u)
-                    obj["has_mask"] = True
-                    obj["mask_shape"] = list(mask_8u.shape)
-                    obj["mask_dtype"] = str(mask_8u.dtype)
-
-                    if self.verbose:
-                        self._logger.debug(f"Added segmentation mask for {obj['label']}")
-
-        # Create supervision detections
-        self._create_supervision_detections(results, detected_objects, track_ids)
-
-        # Publish to Redis
-        # self._publish_detections(detected_objects, self._model_id)
-
-        return detected_objects
-
-    def _detect_transformer_based(self, image: np.ndarray, threshold: float) -> List[Dict]:
-        """Run OWL-V2 or Grounding-DINO detection with label stabilization."""
-        h, w = image.shape[:2]
-
-        # Prepare inputs
-        inputs = self._processor(images=image, text=self._processed_labels, return_tensors="pt").to(self._device)
-
-        # print("_detect_transformer_based:", inputs)
-
-        # Run inference
-        with torch.no_grad():
-            outputs = self._model(**inputs)
-
-        # Post-process results
-        if self._model_id == "owlv2":
-            results = self._processor.post_process_object_detection(
-                outputs=outputs, target_sizes=[(h, w)], threshold=threshold
-            )
-            labels = self._extract_owlv2_labels(results)
-        else:  # grounding_dino
-            results = self._processor.post_process_grounded_object_detection(
-                outputs, inputs.input_ids, box_threshold=threshold, text_threshold=0.3, target_sizes=[(h, w)]
-            )
-            labels = results[0]["labels"]
-
-        boxes = results[0]["boxes"]
-        scores = results[0]["scores"]
-
-        track_ids = None
-
-        # ✅ Tracking (optional)
-        if self._tracker and self._tracker.enable_tracking:
-            try:
-                detections = sv.Detections(
-                    xyxy=boxes.cpu().numpy(), confidence=scores.cpu().numpy(), class_id=np.zeros(len(boxes), dtype=int)
-                )
-                tracked_detections = self._tracker.update_with_detections(detections)
-                track_ids = tracked_detections.tracker_id
-
-            except Exception as e:
-                if self.verbose:
-                    self._logger.warning(f"Tracking update failed: {e}")
-
-        # Convert to object dictionaries
-        detected_objects = ObjectDetector._create_object_dicts(results[0], labels)
-
-        # Attach track IDs
-        if track_ids is not None:
-            for i, obj in enumerate(detected_objects):
-                if i < len(track_ids):
-                    obj["track_id"] = int(track_ids[i])
-
-        # ✅ Apply label stabilization
-        detected_objects = self._apply_label_stabilization(detected_objects, track_ids)
-
-        # Create supervision detections
-        self._create_supervision_detections_from_results(results[0], [obj["label"] for obj in detected_objects], track_ids)
-
-        # Add segmentation if available
-        detected_objects = self._add_segmentation(detected_objects, image, results[0]["boxes"])
-
-        # Publish to Redis
-        # self._publish_detections(detected_objects, self._model_id)
-
-        return detected_objects
-
-    def _apply_label_stabilization(self, detected_objects: List[Dict], track_ids: Optional[np.ndarray]) -> List[Dict]:
-        """
-        Apply label stabilization based on tracking history.
-
-        Args:
-            detected_objects: List of detected object dictionaries
-            track_ids: Array of track IDs corresponding to detections
-
-        Returns:
-            List of detected objects with stabilized labels
-        """
-        if not self._tracker or not self._tracker.enable_tracking or track_ids is None:
-            return detected_objects
-
-        # Extract current labels
-        current_labels = [obj["label"] for obj in detected_objects]
-
-        # Get stabilized labels from tracker
-        stabilized_labels = self._tracker.update_label_history(track_ids, current_labels)
-
-        # Update detected objects with stabilized labels
-        for obj, stabilized_label in zip(detected_objects, stabilized_labels):
-            obj["label"] = stabilized_label
-
-        # Clean up lost tracks
-        if len(track_ids) > 0:
-            lost_tracks = self._tracker.detect_lost_tracks(track_ids)
-            if lost_tracks:
-                self._tracker.cleanup_lost_tracks(lost_tracks)
-
-        return detected_objects
-
-    @staticmethod
-    def _create_object_dicts(results: Dict, labels: Union[List[str], np.ndarray]) -> List[Dict]:
-        """Create standardized object dictionaries from detection results."""
-        detected_objects = []
-
-        for i, (box, score) in enumerate(zip(results["boxes"], results["scores"])):
-            x_min, y_min, x_max, y_max = map(int, box)
-            label = labels[i] if isinstance(labels, (list, np.ndarray)) else labels
-
-            obj_dict = {
-                "label": str(label),
-                "confidence": float(score),
-                "bbox": {"x_min": x_min, "y_min": y_min, "x_max": x_max, "y_max": y_max},
-                "has_mask": False,
-            }
-            detected_objects.append(obj_dict)
-
-        return detected_objects
-
-    def _add_segmentation(self, objects: List[Dict], image: np.ndarray, boxes: torch.Tensor) -> List[Dict]:
-        """Add segmentation masks to detected objects."""
-        if self._segmenter.segmenter() is None:
-            return objects
-
-        masks = []
-        for i, (obj, box) in enumerate(zip(objects, boxes)):
-            try:
-                mask_8u, mask_binary = self._segmenter.segment_box_in_image(box, image)
-                if mask_8u is not None:
-                    # Serialize mask for Redis
-                    obj["mask_data"] = ObjectDetector._serialize_mask(mask_8u)
-                    obj["has_mask"] = True
-                    obj["mask_shape"] = list(mask_8u.shape)  # [height, width]
-                    obj["mask_dtype"] = str(mask_8u.dtype)  # 'uint8'
-                    masks.append(mask_binary)
-                else:
-                    masks.append(None)
-            except Exception as e:
-                if self.verbose:
-                    self._logger.warning(f"Segmentation failed for object {i}: {e}")
-                masks.append(None)
-
-        # Store masks for supervision
-        if self._current_detections is not None:
-            self._current_detections.mask = [m for m in masks if m is not None]
-
-        return objects
-
-    @staticmethod
-    def _serialize_mask(mask: np.ndarray) -> str:
-        """Serialize numpy mask to base64 string."""
-        return base64.b64encode(mask.tobytes()).decode("utf-8")
-
-    def _create_supervision_detections(self, results, objects: List[Dict], track_ids: Optional[np.ndarray] = None):
-        """Create supervision detections from YOLO results."""
-        if not results[0].boxes:
-            self._current_detections = None
-            return
-
-        boxes = results[0].boxes
-        xyxy = boxes.xyxy.cpu().numpy()
-        conf = boxes.conf.cpu().numpy()
-        cls = boxes.cls.cpu().numpy().astype(int)
-
-        detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
-
-        if track_ids is not None:
-            detections.tracker_id = track_ids  # 🔥 wichtig: Track-IDs übernehmen
-
-        self._current_detections = detections
-        # self._current_detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
-        self._current_labels = np.array([objects[i]["label"] for i in range(len(objects))])
-
-    def _create_supervision_detections_from_results(self, results: Dict, labels, track_ids: Optional[np.ndarray] = None):
-        """Create supervision detections from transformer results."""
-        xyxy = results["boxes"].cpu().detach().numpy()
-        conf = results["scores"].cpu().detach().numpy()
-
-        # Create class IDs
-        if self._model_id == "owlv2":
-            cls = results["labels"].cpu().detach().numpy()
-        else:  # grounding_dino
-            cls = ObjectDetector._convert_labels_to_class_ids(labels)
-
-        detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
-        if track_ids is not None:
-            detections.tracker_id = track_ids
-        self._current_detections = detections
-        # self._current_detections = sv.Detections(xyxy=xyxy, confidence=conf, class_id=cls)
-        self._current_labels = np.array([str(label) for label in labels])
-
-    def _extract_owlv2_labels(self, results) -> np.ndarray:
-        """Extract text labels for OWL-V2 results."""
-        labels = []
-        for label_idx in results[0]["labels"]:
-            label_text = self._object_labels[0][label_idx.item()]
-            labels.append(label_text)
-        return np.array(labels)
-
-    @staticmethod
-    def _convert_labels_to_class_ids(labels: List[str]) -> np.ndarray:
-        """Convert string labels to class IDs for Grounding-DINO."""
-        class_ids = []
-        for label in labels:
-            try:
-                # This is a simplified approach - you might need to adjust
-                # based on your specific label structure
-                class_id = hash(label.lower()) % 100  # Simple hash-based ID
-                class_ids.append(class_id)
-            except Exception:
-                class_ids.append(0)  # Default class ID
-        return np.array(class_ids)
-
-    def _publish_detections(self, objects: List[Dict], method: str):
+    def _publish_detections(self, objects: List[Dict[str, Any]], method: str) -> None:
         """Publish detections to Redis."""
         if not objects or self._redis_broker is None:
             return
+
+        # Clean object dicts of large or non-serializable objects before publishing
+        clean_objects = []
+        for obj in objects:
+            clean_obj = obj.copy()
+            if "results" in clean_obj:
+                del clean_obj["results"]
+            clean_objects.append(clean_obj)
 
         metadata = {
             "timestamp": time.time(),
@@ -609,110 +417,20 @@ class ObjectDetector:
         }
 
         try:
-            self._redis_broker.publish_objects(objects, metadata, maxlen=500)
+            self._redis_broker.publish_objects(clean_objects, metadata, maxlen=500)
         except Exception as e:
-            redis_error = handle_redis_error("publish", self._redis_host, self._redis_port, e)
-            if self.verbose:
-                self._logger.warning(str(redis_error))
-
-    def _load_model(self, model_id: str) -> Tuple[any, any]:
-        """Load the specified model and processor."""
-        if "yoloe" in model_id.lower():
-            return self._load_yoloe_model()
-        elif model_id == "yolo-world":
-            return self._load_yolo_model()
-        elif model_id == "owlv2":
-            return self._load_owlv2_model()
-        elif model_id == "grounding_dino":
-            return self._load_grounding_dino_model()
-        else:
-            raise ModelLoadError(model_id, "Unknown model type")
-
-    def _load_yolo_model(self):
-        """Load YOLO-World model."""
-        model_config = MODEL_CONFIGS["yolo-world"]
-        model_path = model_config.model_params["model_path"]
-        model = YOLO(model_path)
-        model.set_classes(self._object_labels[0])
-        return model, None
-
-    def _load_yoloe_model(self):
-        """Load YOLOE model."""
-        model_config = MODEL_CONFIGS[self._model_id]
-        model_path = model_config.model_params["model_path"]
-
-        # Initialize YOLOE model
-        model = YOLOE(model_path)
-
-        # Check if prompt-free variant
-        is_prompt_free = model_config.model_params.get("is_prompt_free", False)
-
-        if not is_prompt_free and model_config.model_params.get("supports_prompts", True):
-            # Set classes for prompted models (text prompts)
-            # This allows open-vocabulary detection
-            model.set_classes(self._object_labels[0], model.get_text_pe(self._object_labels[0]))
-            if self.verbose:
-                self._logger.info(f"YOLOE model loaded with {len(self._object_labels[0])} text prompts")
-        else:
-            # Prompt-free models use internal vocabulary (1200+ classes)
-            if self.verbose:
-                self._logger.info("YOLOE prompt-free model loaded with internal vocabulary")
-
-        return model, None
-
-    def _load_owlv2_model(self):
-        """Load OWL-V2 model."""
-        model_config = MODEL_CONFIGS["owlv2"]
-        model_path = model_config.model_params["model_path"]
-        processor = Owlv2Processor.from_pretrained(model_path)
-        model = Owlv2ForObjectDetection.from_pretrained(model_path).to(self._device)
-        return model, processor
-
-    def _load_grounding_dino_model(self):
-        """Load Grounding-DINO model."""
-        model_config = MODEL_CONFIGS["grounding_dino"]
-        model_path = model_config.model_params["model_path"]
-        processor = AutoProcessor.from_pretrained(model_path)
-        model = AutoModelForZeroShotObjectDetection.from_pretrained(model_path).to(self._device)
-        return model, processor
-
-    def set_publish_during_movement(self, enable: bool):
-        """
-        Enable or disable publishing detections during robot movement.
-
-        Args:
-            enable: Whether to publish detections when robot is moving
-        """
-        self._publish_during_movement = enable
-        if self.verbose:
-            status = "enabled" if enable else "disabled"
-            self._logger.info(f"Publishing during movement {status}")
+            if self._verbose:
+                self._logger.warning(f"Redis publish failed: {e}")
 
     # Public API methods
-    def add_label(self, label: str):
+    def add_label(self, label: str) -> None:
         """Add a new detectable object label."""
         self._object_labels[0].append(label.lower())
-
-        if "yoloe" in self._model_id.lower():
-            # Check if it's a prompt-free variant
-            model_config = MODEL_CONFIGS.get(self._model_id)
-            if model_config and not model_config.model_params.get("is_prompt_free", False):
-                # Re-set classes for prompted YOLOE models
-                self._model.set_classes(self._object_labels[0], self._model.get_text_pe(self._object_labels[0]))
-                if self.verbose:
-                    self._logger.info(f"Updated YOLOE classes with new label: {label}")
-        elif self._model_id == "grounding_dino":
-            self._processed_labels = ObjectDetector._preprocess_labels(self._object_labels, self._model_id)
-        elif self._model_id == "yolo-world":
-            self._model.set_classes(self._object_labels[0])
+        self._backend.add_label(label)
 
     def get_detections(self) -> Optional[sv.Detections]:
         """Get current supervision detections."""
         return self._current_detections
-
-    # def get_label_texts(self) -> Optional[np.ndarray]:
-    #     """Get current detection labels."""
-    #     return self._current_labels
 
     def get_label_texts(self) -> Optional[np.ndarray]:
         """Get current detection labels (with track IDs if available)."""
@@ -723,18 +441,12 @@ class ObjectDetector:
         has_tracking = hasattr(self._current_detections, "tracker_id") and self._current_detections.tracker_id is not None
 
         for i, label in enumerate(self._current_labels):
-            conf = None
-            if hasattr(self._current_detections, "confidence") and self._current_detections.confidence is not None:
-                conf = self._current_detections.confidence[i]
-
-            text = str(label)
-
+            conf = self._current_detections.confidence[i] if self._current_detections.confidence is not None else None
+            text = f"{label}"
             if has_tracking and self._current_detections.tracker_id[i] is not None:
                 text += f" #{int(self._current_detections.tracker_id[i])}"
-
             if conf is not None:
                 text += f" ({conf:.2f})"
-
             labels.append(text)
 
         return np.array(labels)
@@ -744,22 +456,94 @@ class ObjectDetector:
         return self._object_labels
 
     def get_device(self) -> str:
-        """Get the current computation device."""
+        """Get current device."""
         return self._device
 
     def get_model_id(self) -> str:
-        """Get the current model identifier."""
+        """Get current model ID."""
         return self._model_id
 
-    # Backward compatibility methods (deprecated)
-    def detections(self) -> Optional[sv.Detections]:
-        """Deprecated: use get_detections() instead."""
+    @property
+    def _processed_labels(self):
+        """Legacy property for backward compatibility in tests."""
+        return getattr(self._backend, "processed_labels", None)
+
+    @_processed_labels.setter
+    def _processed_labels(self, value):
+        """Legacy setter for backward compatibility in tests."""
+        if hasattr(self._backend, "processed_labels"):
+            self._backend.processed_labels = value
+
+    def set_publish_during_movement(self, enable: bool) -> None:
+        """Set publishing during movement flag."""
+        self._publish_during_movement = enable
+
+    # Backward compatibility for tests and old code
+    def _load_model(self, model_id: str):
+        return self._backend.load_model()
+
+    def _validate_model_availability(self):
+        pass
+
+    @staticmethod
+    def _preprocess_labels(labels: List[List[str]], model_id: str) -> Union[List[List[str]], str]:
+        if model_id == "grounding_dino":
+            flat_labels = [label.lower() for label in labels[0]]
+            return ". ".join(flat_labels) + "."
+        return labels
+
+    @staticmethod
+    def _create_object_dicts(results: Dict, labels: Union[List[str], np.ndarray]) -> List[Dict]:
+        detected_objects = []
+        for i, (box, score) in enumerate(zip(results["boxes"], results["scores"])):
+            x_min, y_min, x_max, y_max = map(int, box)
+            label = labels[i] if isinstance(labels, (list, np.ndarray)) else labels
+            detected_objects.append(
+                {
+                    "label": str(label),
+                    "confidence": float(score),
+                    "bbox": {"x_min": x_min, "y_min": y_min, "x_max": x_max, "y_max": y_max},
+                    "has_mask": False,
+                }
+            )
+        return detected_objects
+
+    @staticmethod
+    def _convert_labels_to_class_ids(labels: List[str]) -> np.ndarray:
+        return np.array([hash(label.lower()) % 100 for label in labels])
+
+    def _create_supervision_detections(self, results, objects, track_ids=None):
+        self._update_supervision_state(objects, track_ids)
+
+    def _create_supervision_detections_from_results(self, results, labels, track_ids=None):
+        objects = [
+            {
+                "bbox": {"x_min": int(box[0]), "y_min": int(box[1]), "x_max": int(box[2]), "y_max": int(box[3])},
+                "confidence": float(score),
+                "label": labels[i],
+            }
+            for i, (box, score) in enumerate(zip(results["boxes"], results["scores"]))
+        ]
+        self._update_supervision_state(objects, track_ids)
+
+    def _detect_transformer_based(self, image: np.ndarray, threshold: float) -> List[Dict]:
+        """Legacy method for backward compatibility in tests."""
+        return self._backend.detect(image, threshold)
+
+    def _detect_yolo(self, image: np.ndarray, threshold: float) -> List[Dict]:
+        """Legacy method for backward compatibility in tests."""
+        return self._backend.detect(image, threshold)
+
+    def _detect_yoloe(self, image: np.ndarray, threshold: float) -> List[Dict]:
+        """Legacy method for backward compatibility in tests."""
+        return self._backend.detect(image, threshold)
+
+    # Deprecated
+    def detections(self):
         return self.get_detections()
 
-    def label_texts(self) -> Optional[np.ndarray]:
-        """Deprecated: use get_label_texts() instead."""
+    def label_texts(self):
         return self.get_label_texts()
 
-    def object_labels(self) -> List[List[str]]:
-        """Deprecated: use get_object_labels() instead."""
+    def object_labels(self):
         return self.get_object_labels()

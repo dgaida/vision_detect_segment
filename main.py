@@ -1,18 +1,23 @@
-import cv2
 import time
 from pathlib import Path
 
-from vision_detect_segment.core.visualcortex import VisualCortex
-from vision_detect_segment.utils.config import get_default_config, create_test_config
-from vision_detect_segment.utils.utils import (
-    create_test_image,
-    load_image_safe,
-    format_detection_results,
-    setup_logging,
-    Timer,
-)
-from vision_detect_segment.utils.exceptions import VisionDetectionError, RedisConnectionError, DetectionError
+import cv2
 from redis_robot_comm import RedisImageStreamer
+
+from vision_detect_segment.core.visualcortex import VisualCortex
+from vision_detect_segment.utils.config import create_test_config, get_default_config
+from vision_detect_segment.utils.exceptions import (
+    DetectionError,
+    RedisConnectionError,
+    VisionDetectionError,
+)
+from vision_detect_segment.utils.utils import (
+    Timer,
+    create_test_image,
+    format_detection_results,
+    load_image_safe,
+    setup_logging,
+)
 
 
 def publish_test_image(stream_name: str = "robot_camera", use_test_config: bool = True):

@@ -7,14 +7,15 @@ Shows how labels evolve from detection to stabilization.
 """
 
 import sys
-import time
-import numpy as np
-from typing import Dict, Optional
-from collections import Counter
-from redis_robot_comm import RedisMessageBroker
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 import threading
+import time
+from collections import Counter
+from typing import Dict, Optional
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.animation import FuncAnimation
+from redis_robot_comm import RedisMessageBroker
 
 
 class LabelStabilityVisualizer:

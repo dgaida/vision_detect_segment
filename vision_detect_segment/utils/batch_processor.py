@@ -5,12 +5,13 @@ Batch processing utilities for high-throughput detection scenarios.
 Optimizes GPU utilization through batched inference.
 """
 
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import torch
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
-import time
-import logging
 
 
 @dataclass

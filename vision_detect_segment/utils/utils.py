@@ -3,15 +3,16 @@ Utility functions for the vision_detect_segment package.
 Contains helper functions for image processing, logging, validation, and other common operations.
 """
 
-import cv2
-import numpy as np
 import logging
 import time
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
+
+import cv2
+import numpy as np
 import torch
 
-from .exceptions import ImageProcessingError, ConfigurationError, DependencyError
+from .exceptions import ConfigurationError, DependencyError, ImageProcessingError
 
 
 # Logging setup
@@ -501,8 +502,9 @@ def get_memory_usage() -> Dict[str, float]:
     Returns:
         Dict with memory usage in MB
     """
-    import psutil
     import os
+
+    import psutil
 
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()

@@ -3,16 +3,17 @@ Integration tests for vision_detect_segment package - Part 3.
 Tests edge cases, stress scenarios, and complex workflows.
 """
 
-import pytest
-import numpy as np
-import torch
 from unittest.mock import Mock, patch
-import supervision as sv
 
-from vision_detect_segment.core.visualcortex import VisualCortex
+import numpy as np
+import pytest
+import supervision as sv
+import torch
+
 from vision_detect_segment.core.object_detector import ObjectDetector
 from vision_detect_segment.core.object_segmenter import ObjectSegmenter
 from vision_detect_segment.core.object_tracker import ObjectTracker
+from vision_detect_segment.core.visualcortex import VisualCortex
 from vision_detect_segment.utils.config import create_test_config
 from vision_detect_segment.utils.exceptions import (
     DetectionError,

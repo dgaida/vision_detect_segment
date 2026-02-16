@@ -5,29 +5,29 @@ Async-enabled version of VisualCortex with background processing,
 Redis streaming, and proper queue management.
 """
 
-import numpy as np
-from typing import List, Optional, Dict, Any
-import supervision as sv
-import cv2
 import copy
 import threading
 import time
+from typing import Any, Dict, List, Optional
 
-from .async_processor import AsyncProcessor, ProcessingResult
-from .object_detector import ObjectDetector
+import cv2
+import numpy as np
+import supervision as sv
+from redis_robot_comm import RedisImageStreamer, RedisLabelManager
+
 from ..utils.config import VisionConfig, get_default_config
 from ..utils.exceptions import (
     DetectionError,
 )
 from ..utils.utils import (
-    setup_logging,
-    get_optimal_device,
-    validate_image,
-    resize_image,
     clear_gpu_cache,
+    get_optimal_device,
+    resize_image,
+    setup_logging,
+    validate_image,
 )
-
-from redis_robot_comm import RedisImageStreamer, RedisLabelManager
+from .async_processor import AsyncProcessor, ProcessingResult
+from .object_detector import ObjectDetector
 
 
 class VisualCortexAsync:

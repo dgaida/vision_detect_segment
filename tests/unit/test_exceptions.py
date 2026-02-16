@@ -3,18 +3,19 @@ Unit tests for custom exceptions.
 """
 
 import pytest
+
 from vision_detect_segment.utils.exceptions import (
-    VisionDetectionError,
-    ModelLoadError,
-    DetectionError,
-    SegmentationError,
-    RedisConnectionError,
-    ImageProcessingError,
+    AnnotationError,
     ConfigurationError,
     DependencyError,
-    AnnotationError,
-    handle_model_loading_error,
+    DetectionError,
+    ImageProcessingError,
+    ModelLoadError,
+    RedisConnectionError,
+    SegmentationError,
+    VisionDetectionError,
     handle_detection_error,
+    handle_model_loading_error,
     handle_redis_error,
 )
 

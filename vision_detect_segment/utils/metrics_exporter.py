@@ -4,10 +4,10 @@ vision_detect_segment/utils/metrics_exporter.py
 HTTP server for exporting metrics to Prometheus and other monitoring systems.
 """
 
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Optional
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Optional
 
 from .metrics import MetricsRegistry, get_default_registry
 
@@ -172,8 +172,9 @@ def example_visualcortex_integration():
 
         # Update memory metrics periodically
         try:
-            import psutil
             import os
+
+            import psutil
 
             process = psutil.Process(os.getpid())
             mem = process.memory_info()
@@ -217,7 +218,10 @@ Example 3: Using MetricsTimer context manager
 
 
 def example_metrics_timer():
-    from vision_detect_segment.core.visualcortex_metrics import VisionMetrics, MetricsTimer
+    from vision_detect_segment.core.visualcortex_metrics import (
+        MetricsTimer,
+        VisionMetrics,
+    )
 
     metrics = VisionMetrics(model_id="owlv2")
 
@@ -328,6 +332,7 @@ def example_metrics_dashboard():
     This could be extended to a full web dashboard.
     """
     import time
+
     from vision_detect_segment.utils.metrics import get_default_registry
 
     registry = get_default_registry()
@@ -412,9 +417,10 @@ if __name__ == "__main__":
     exporter.start()
 
     # Simulate some metrics
-    from vision_detect_segment.utils.metrics import get_default_registry
-    import time
     import random
+    import time
+
+    from vision_detect_segment.utils.metrics import get_default_registry
 
     registry = get_default_registry()
 

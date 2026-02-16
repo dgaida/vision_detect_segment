@@ -2,15 +2,16 @@
 Extended unit tests for VisualCortex class to increase coverage.
 """
 
-import pytest
-import numpy as np
 from unittest.mock import Mock, patch
-import supervision as sv
 
-# import copy
+import numpy as np
+import pytest
+import supervision as sv
 
 from vision_detect_segment.core.visualcortex import VisualCortex
 from vision_detect_segment.utils.config import create_test_config
+
+# import copy
 
 
 class TestVisualCortexInitialization:

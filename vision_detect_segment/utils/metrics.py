@@ -5,13 +5,13 @@ Comprehensive metrics collection and monitoring system.
 Provides Prometheus-style metrics for production observability.
 """
 
-import time
-import threading
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
-from collections import defaultdict, deque
-from enum import Enum
 import json
+import threading
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class MetricType(Enum):

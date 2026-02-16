@@ -3,14 +3,15 @@ Enhanced unit tests for ObjectDetector class to increase code coverage.
 Tests focus on uncovered code paths, edge cases, and error conditions.
 """
 
-import pytest
-import numpy as np
-import torch
 from unittest.mock import Mock, patch
+
+import numpy as np
+import pytest
 import supervision as sv
+import torch
 
 from vision_detect_segment.core.object_detector import ObjectDetector
-from vision_detect_segment.utils.config import create_test_config, MODEL_CONFIGS
+from vision_detect_segment.utils.config import MODEL_CONFIGS, create_test_config
 
 
 class TestObjectDetectorLabelStabilization:

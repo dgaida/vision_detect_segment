@@ -3,20 +3,20 @@ Integration tests for vision_detect_segment package - Part 2.
 Tests Redis integration, label management, and advanced workflows.
 """
 
-import pytest
-import numpy as np
-import torch
-from unittest.mock import Mock, patch
-import supervision as sv
 import time
+from unittest.mock import Mock, patch
 
-from vision_detect_segment.core.visualcortex import VisualCortex
+import numpy as np
+import pytest
+import supervision as sv
+import torch
+
 from vision_detect_segment.core.object_detector import ObjectDetector
 from vision_detect_segment.core.object_tracker import ObjectTracker
+from vision_detect_segment.core.visualcortex import VisualCortex
 from vision_detect_segment.utils.config import create_test_config
-from vision_detect_segment.utils.utils import create_test_image
-
 from vision_detect_segment.utils.exceptions import RedisConnectionError
+from vision_detect_segment.utils.utils import create_test_image
 
 
 class TestRedisIntegration:

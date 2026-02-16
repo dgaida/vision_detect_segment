@@ -5,8 +5,8 @@ Metrics integration for VisualCortex class.
 Adds comprehensive monitoring and observability.
 """
 
-from typing import Dict, Any, Optional
 import time
+from typing import Any, Dict, Optional
 
 from ..utils.metrics import MetricsRegistry, get_default_registry
 

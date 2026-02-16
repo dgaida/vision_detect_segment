@@ -3,10 +3,11 @@ Integration tests for annotated frame publishing pipeline.
 Tests complete annotation workflow from detection to Redis publishing.
 """
 
-import pytest
-import numpy as np
 import time
 from unittest.mock import Mock, patch
+
+import numpy as np
+import pytest
 import supervision as sv
 
 from vision_detect_segment.core.visualcortex import VisualCortex

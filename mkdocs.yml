@@ -1,0 +1,24 @@
+site_name: vision_detect_segment
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          setup_commands:
+            - import sys
+            - sys.path.append(".")
+
+nav:
+  - Home: index.md
+  - Installation: INSTALL.md
+  - API Reference: api.md
+  - Architecture: architecture.md

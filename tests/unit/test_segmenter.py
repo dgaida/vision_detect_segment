@@ -2,11 +2,12 @@
 Extended unit tests for ObjectSegmenter class to increase coverage.
 """
 
-import pytest
-import numpy as np
-import torch
 from unittest.mock import Mock, patch
+
+import numpy as np
+import pytest
 import supervision as sv
+import torch
 
 from vision_detect_segment.core.object_segmenter import ObjectSegmenter
 from vision_detect_segment.utils.exceptions import (
