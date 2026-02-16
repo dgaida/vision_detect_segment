@@ -7,9 +7,10 @@ This script now properly exits when Redis is not available, providing clear erro
 
 import sys
 import time
+
 from vision_detect_segment import VisualCortex, get_default_config
-from vision_detect_segment.utils.exceptions import RedisConnectionError
 from vision_detect_segment.core.visualcortex_metrics import VisionMetrics
+from vision_detect_segment.utils.exceptions import RedisConnectionError
 from vision_detect_segment.utils.metrics_exporter import MetricsExporter
 
 

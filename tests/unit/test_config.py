@@ -3,15 +3,16 @@ Unit tests for configuration module.
 """
 
 import pytest
+
 from vision_detect_segment.utils.config import (
-    VisionConfig,
+    MODEL_CONFIGS,
+    AnnotationConfig,
     ModelConfig,
     RedisConfig,
-    AnnotationConfig,
-    get_default_config,
+    VisionConfig,
     create_test_config,
+    get_default_config,
     get_model_config,
-    MODEL_CONFIGS,
 )
 
 

@@ -3,10 +3,11 @@ Unit tests for visualcortex_async.py
 Tests VisualCortexAsync with async processing capabilities.
 """
 
-import pytest
-import numpy as np
 import time
 from unittest.mock import Mock, patch
+
+import numpy as np
+import pytest
 import supervision as sv
 
 from vision_detect_segment.core.visualcortex_async import VisualCortexAsync

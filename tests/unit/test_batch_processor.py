@@ -3,14 +3,16 @@ Unit tests for batch_processor.py
 Tests BatchConfig, BatchAccumulator, and BatchImageProcessor.
 """
 
-import pytest
-import numpy as np
 import time
-import torch
 from unittest.mock import Mock, patch
+
+import numpy as np
+import pytest
+import torch
+
 from vision_detect_segment.utils.batch_processor import (
-    BatchConfig,
     BatchAccumulator,
+    BatchConfig,
     BatchImageProcessor,
 )
 

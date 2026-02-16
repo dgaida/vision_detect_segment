@@ -1,9 +1,17 @@
+from typing import Any, Dict, List, Union
+
 import numpy as np
 import torch
-from typing import List, Dict, Any, Union
-from transformers import Owlv2Processor, Owlv2ForObjectDetection, AutoProcessor, AutoModelForZeroShotObjectDetection
-from .base import DetectionBackend
+from transformers import (
+    AutoModelForZeroShotObjectDetection,
+    AutoProcessor,
+    Owlv2ForObjectDetection,
+    Owlv2Processor,
+)
+
 from ...utils.config import MODEL_CONFIGS
+from .base import DetectionBackend
+
 
 class TransformerBackend(DetectionBackend):
     """Base class for transformer-based detectors (OWL-V2, Grounding-DINO)."""
@@ -28,7 +36,7 @@ class TransformerBackend(DetectionBackend):
         if self.model_id == "owlv2":
             self.processor = Owlv2Processor.from_pretrained(model_path)
             self.model = Owlv2ForObjectDetection.from_pretrained(model_path).to(self.device)
-        else: # grounding_dino
+        else:  # grounding_dino
             self.processor = AutoProcessor.from_pretrained(model_path)
             self.model = AutoModelForZeroShotObjectDetection.from_pretrained(model_path).to(self.device)
 
@@ -40,11 +48,9 @@ class TransformerBackend(DetectionBackend):
             outputs = self.model(**inputs)
 
         if self.model_id == "owlv2":
-            results = self.processor.post_process_object_detection(
-                outputs=outputs, target_sizes=[(h, w)], threshold=threshold
-            )
+            results = self.processor.post_process_object_detection(outputs=outputs, target_sizes=[(h, w)], threshold=threshold)
             labels = self._extract_owlv2_labels(results)
-        else: # grounding_dino
+        else:  # grounding_dino
             results = self.processor.post_process_grounded_object_detection(
                 outputs, inputs.input_ids, box_threshold=threshold, text_threshold=0.3, target_sizes=[(h, w)]
             )
@@ -60,7 +66,7 @@ class TransformerBackend(DetectionBackend):
                 "confidence": float(score),
                 "bbox": {"x_min": x_min, "y_min": y_min, "x_max": x_max, "y_max": y_max},
                 "has_mask": False,
-                "results": results[0]
+                "results": results[0],
             }
             detected_objects.append(obj_dict)
 
@@ -86,10 +92,14 @@ class TransformerBackend(DetectionBackend):
             self.object_labels.append(label.lower())
             self.processed_labels = self._preprocess_labels(self.object_labels, self.model_id)
 
+
 class Owlv2Backend(TransformerBackend):
     """OWL-V2 specific backend."""
+
     pass
+
 
 class GroundingDinoBackend(TransformerBackend):
     """Grounding-DINO specific backend."""
+
     pass

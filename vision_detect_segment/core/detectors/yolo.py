@@ -1,8 +1,11 @@
+from typing import Any, Dict, List
+
 import numpy as np
-from typing import List, Dict, Any
 from ultralytics import YOLO
-from .base import DetectionBackend
+
 from ...utils.config import MODEL_CONFIGS
+from .base import DetectionBackend
+
 
 class YOLOWorldBackend(DetectionBackend):
     """YOLO-World detection backend."""
@@ -39,7 +42,7 @@ class YOLOWorldBackend(DetectionBackend):
                 "confidence": confidence,
                 "bbox": {"x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2},
                 "has_mask": False,
-                "results": results # Keep results for supervision
+                "results": results,  # Keep results for supervision
             }
 
             if hasattr(boxes, "id") and boxes.id is not None:

@@ -3,15 +3,17 @@ Unit tests for async_processor.py
 Tests AsyncProcessor, BackpressureHandler, and ProcessingTask/ProcessingResult.
 """
 
-import pytest
-import numpy as np
 import time
+
+import numpy as np
+import pytest
+
 from vision_detect_segment.core.async_processor import (
     AsyncProcessor,
     BackpressureHandler,
-    ProcessingTask,
     ProcessingResult,
     ProcessingState,
+    ProcessingTask,
 )
 
 

@@ -1,15 +1,19 @@
 import time
 from enum import Enum
-from typing import Callable, Any, Optional, Type
+from typing import Any, Callable, Optional, Type
+
 
 class CircuitState(Enum):
-    CLOSED = "closed"      # Normal operation
-    OPEN = "open"          # Failing, reject immediately
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing, reject immediately
     HALF_OPEN = "half_open"  # Testing if service recovered
+
 
 class CircuitBreakerOpenError(Exception):
     """Exception raised when the circuit breaker is open."""
+
     pass
+
 
 class CircuitBreaker:
     """
@@ -17,10 +21,7 @@ class CircuitBreaker:
     """
 
     def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout: float = 60.0,
-        expected_exception: Type[Exception] = Exception
+        self, failure_threshold: int = 5, recovery_timeout: float = 60.0, expected_exception: Type[Exception] = Exception
     ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
@@ -42,9 +43,7 @@ class CircuitBreaker:
             if time.time() - self.last_failure_time >= self.recovery_timeout:
                 self.state = CircuitState.HALF_OPEN
             else:
-                raise CircuitBreakerOpenError(
-                    f"Circuit breaker open, retry after {self.recovery_timeout}s"
-                )
+                raise CircuitBreakerOpenError(f"Circuit breaker open, retry after {self.recovery_timeout}s")
 
         try:
             result = func(*args, **kwargs)

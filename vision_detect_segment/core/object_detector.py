@@ -1,28 +1,33 @@
-import numpy as np
-import time
 import base64
 import os
-from typing import List, Dict, Optional, Union, Any
-import torch
-import supervision as sv
+import time
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
-from .object_segmenter import ObjectSegmenter
-from .object_tracker import ObjectTracker
-from .detectors.owlv2 import Owlv2Backend, GroundingDinoBackend
-from .detectors.yolo import YOLOWorldBackend
-from .detectors.yoloe import YOLOEBackend
-
+import numpy as np
+import supervision as sv
+import torch
 from redis_robot_comm import RedisMessageBroker
 
 from ..utils.config import VisionConfig
 from ..utils.exceptions import (
     ModelLoadError,
-    handle_model_loading_error,
     handle_detection_error,
+    handle_model_loading_error,
     handle_redis_error,
 )
-from ..utils.utils import setup_logging, get_optimal_device, Timer, validate_confidence_threshold
+from ..utils.utils import (
+    Timer,
+    get_optimal_device,
+    setup_logging,
+    validate_confidence_threshold,
+)
+from .detectors.owlv2 import GroundingDinoBackend, Owlv2Backend
+from .detectors.yolo import YOLOWorldBackend
+from .detectors.yoloe import YOLOEBackend
+from .object_segmenter import ObjectSegmenter
+from .object_tracker import ObjectTracker
+
 
 class ObjectDetector:
     """
@@ -97,10 +102,10 @@ class ObjectDetector:
 
             # Initialize tracker
             self._tracker = ObjectTracker(
-                model=getattr(self._backend, 'model', None),
+                model=getattr(self._backend, "model", None),
                 model_id=self._model_id,
                 enable_tracking=enable_tracking,
-                verbose=self._verbose
+                verbose=self._verbose,
             )
 
             # Initialize Redis broker
@@ -155,10 +160,7 @@ class ObjectDetector:
             self._redis_broker = None
 
     def detect_objects(
-        self,
-        image: np.ndarray,
-        confidence_threshold: Optional[float] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        self, image: np.ndarray, confidence_threshold: Optional[float] = None, metadata: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
         Run object detection or tracking on the given image.
@@ -214,14 +216,15 @@ class ObjectDetector:
         track_ids = None
         if not self._backend.supports_tracking:
             # Use ByteTrack for models without built-in tracking
-            boxes = np.array([[obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]] for obj in detected_objects])
+            boxes = np.array(
+                [
+                    [obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]]
+                    for obj in detected_objects
+                ]
+            )
             scores = np.array([obj["confidence"] for obj in detected_objects])
             if len(boxes) > 0:
-                detections = sv.Detections(
-                    xyxy=boxes,
-                    confidence=scores,
-                    class_id=np.zeros(len(boxes), dtype=int)
-                )
+                detections = sv.Detections(xyxy=boxes, confidence=scores, class_id=np.zeros(len(boxes), dtype=int))
                 tracked_detections = self._tracker.update_with_detections(detections)
                 track_ids = tracked_detections.tracker_id
 
@@ -253,7 +256,12 @@ class ObjectDetector:
         else:
             # Use external segmenter (SAM/FastSAM)
             if detected_objects:
-                boxes = torch.tensor([[obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]] for obj in detected_objects])
+                boxes = torch.tensor(
+                    [
+                        [obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]]
+                        for obj in detected_objects
+                    ]
+                )
                 detected_objects = self._add_segmentation(detected_objects, image, boxes)
 
         return detected_objects
@@ -265,7 +273,9 @@ class ObjectDetector:
             self._current_labels = None
             return
 
-        xyxy = np.array([[obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]] for obj in objects])
+        xyxy = np.array(
+            [[obj["bbox"]["x_min"], obj["bbox"]["y_min"], obj["bbox"]["x_max"], obj["bbox"]["y_max"]] for obj in objects]
+        )
         confidence = np.array([obj["confidence"] for obj in objects])
         class_id = np.zeros(len(objects), dtype=int)
 
@@ -276,7 +286,9 @@ class ObjectDetector:
         self._current_detections = detections
         self._current_labels = np.array([obj["label"] for obj in objects])
 
-    def _apply_label_stabilization(self, detected_objects: List[Dict[str, Any]], track_ids: Optional[np.ndarray]) -> List[Dict[str, Any]]:
+    def _apply_label_stabilization(
+        self, detected_objects: List[Dict[str, Any]], track_ids: Optional[np.ndarray]
+    ) -> List[Dict[str, Any]]:
         """Apply label stabilization based on tracking history."""
         if not self._tracker or not self._tracker.enable_tracking or track_ids is None:
             return detected_objects
@@ -329,9 +341,9 @@ class ObjectDetector:
         if self._publish_during_movement or metadata is None:
             return True
 
-        is_moving = metadata.get("is_moving", False) or \
-                    metadata.get("robot_moving", False) or \
-                    metadata.get("camera_moving", False)
+        is_moving = (
+            metadata.get("is_moving", False) or metadata.get("robot_moving", False) or metadata.get("camera_moving", False)
+        )
 
         if is_moving and self._verbose:
             self._logger.debug("Robot movement detected - skipping detection publishing")
@@ -410,33 +422,59 @@ class ObjectDetector:
         self._publish_during_movement = enable
 
     # Backward compatibility for tests and old code
-    def _load_model(self, model_id: str): return self._backend.load_model()
-    def _validate_model_availability(self): pass
+    def _load_model(self, model_id: str):
+        return self._backend.load_model()
+
+    def _validate_model_availability(self):
+        pass
+
     @staticmethod
     def _preprocess_labels(labels: List[List[str]], model_id: str) -> Union[List[List[str]], str]:
         if model_id == "grounding_dino":
             flat_labels = [label.lower() for label in labels[0]]
             return ". ".join(flat_labels) + "."
         return labels
+
     @staticmethod
     def _create_object_dicts(results: Dict, labels: Union[List[str], np.ndarray]) -> List[Dict]:
         detected_objects = []
         for i, (box, score) in enumerate(zip(results["boxes"], results["scores"])):
             x_min, y_min, x_max, y_max = map(int, box)
             label = labels[i] if isinstance(labels, (list, np.ndarray)) else labels
-            detected_objects.append({"label": str(label), "confidence": float(score), "bbox": {"x_min": x_min, "y_min": y_min, "x_max": x_max, "y_max": y_max}, "has_mask": False})
+            detected_objects.append(
+                {
+                    "label": str(label),
+                    "confidence": float(score),
+                    "bbox": {"x_min": x_min, "y_min": y_min, "x_max": x_max, "y_max": y_max},
+                    "has_mask": False,
+                }
+            )
         return detected_objects
+
     @staticmethod
     def _convert_labels_to_class_ids(labels: List[str]) -> np.ndarray:
         return np.array([hash(label.lower()) % 100 for label in labels])
 
     def _create_supervision_detections(self, results, objects, track_ids=None):
         self._update_supervision_state(objects, track_ids)
+
     def _create_supervision_detections_from_results(self, results, labels, track_ids=None):
-        objects = [{"bbox": {"x_min": int(box[0]), "y_min": int(box[1]), "x_max": int(box[2]), "y_max": int(box[3])}, "confidence": float(score), "label": labels[i]} for i, (box, score) in enumerate(zip(results["boxes"], results["scores"]))]
+        objects = [
+            {
+                "bbox": {"x_min": int(box[0]), "y_min": int(box[1]), "x_max": int(box[2]), "y_max": int(box[3])},
+                "confidence": float(score),
+                "label": labels[i],
+            }
+            for i, (box, score) in enumerate(zip(results["boxes"], results["scores"]))
+        ]
         self._update_supervision_state(objects, track_ids)
 
     # Deprecated
-    def detections(self): return self.get_detections()
-    def label_texts(self): return self.get_label_texts()
-    def object_labels(self): return self.get_object_labels()
+    def detections(self):
+        return self.get_detections()
+
+    def label_texts(self):
+        return self.get_label_texts()
+
+    def object_labels(self):
+        return self.get_object_labels()

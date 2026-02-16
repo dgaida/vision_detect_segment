@@ -6,12 +6,13 @@ Async detection script with background processing, proper error handling,
 and real-time statistics display.
 """
 
+import signal
 import sys
 import time
-import signal
 from typing import Optional
-from vision_detect_segment.core.visualcortex_async import VisualCortexAsync
+
 from vision_detect_segment import get_default_config
+from vision_detect_segment.core.visualcortex_async import VisualCortexAsync
 from vision_detect_segment.utils.exceptions import RedisConnectionError
 
 

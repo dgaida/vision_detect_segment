@@ -3,11 +3,12 @@ Integration tests for multi-frame tracking scenarios.
 Tests tracking consistency, label stabilization, and ID persistence.
 """
 
-import pytest
-import numpy as np
-import torch
 from unittest.mock import Mock, patch
+
+import numpy as np
+import pytest
 import supervision as sv
+import torch
 
 from vision_detect_segment.core.object_detector import ObjectDetector
 from vision_detect_segment.core.object_tracker import ObjectTracker

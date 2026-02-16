@@ -1,5 +1,7 @@
-from typing import TypedDict, List, Optional, Any, Protocol, Dict
+from typing import Any, Dict, List, Optional, Protocol, TypedDict
+
 import numpy as np
+
 
 class BoundingBox(TypedDict):
     x_min: int
@@ -7,8 +9,10 @@ class BoundingBox(TypedDict):
     x_max: int
     y_max: int
 
+
 class DetectedObject(TypedDict, total=False):
     """Detected object with optional segmentation and tracking."""
+
     label: str
     confidence: float
     bbox: BoundingBox
@@ -20,12 +24,16 @@ class DetectedObject(TypedDict, total=False):
     # Internal use
     results: Optional[Any]
 
+
 class DetectionModel(Protocol):
     """Protocol for detection model backends."""
+
     def predict(self, image: np.ndarray, conf: float, max_det: int) -> Any: ...
     def get_names(self) -> Dict[int, str]: ...
 
+
 class Tracker(Protocol):
     """Protocol for object tracking."""
+
     def update_with_detections(self, detections: Any) -> Any: ...
     def reset(self) -> None: ...

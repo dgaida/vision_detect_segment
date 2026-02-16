@@ -1,12 +1,13 @@
-import time
 import functools
+import time
 from typing import Callable, Tuple, Type
+
 
 def retry_with_backoff(
     max_attempts: int = 3,
     initial_delay: float = 1.0,
     backoff_factor: float = 2.0,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,)
+    exceptions: Tuple[Type[Exception], ...] = (Exception,),
 ):
     """
     Decorator for retrying functions with exponential backoff.
@@ -17,6 +18,7 @@ def retry_with_backoff(
         backoff_factor: Multiplier for the delay after each failed attempt
         exceptions: Tuple of exceptions to catch and retry on
     """
+
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -36,5 +38,7 @@ def retry_with_backoff(
 
             if last_exception:
                 raise last_exception
+
         return wrapper
+
     return decorator

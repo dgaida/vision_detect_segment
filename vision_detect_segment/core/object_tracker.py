@@ -2,10 +2,11 @@
 Unified object tracking interface with progressive label stabilization.
 """
 
+from collections import Counter, defaultdict
+from typing import Any, Dict, List, Optional
+
 import numpy as np
 import supervision as sv
-from typing import Any, Dict, List, Optional
-from collections import Counter, defaultdict
 
 # --- Compatibility import for ByteTrack ---
 try:

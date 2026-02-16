@@ -1,15 +1,21 @@
+from typing import Any, Optional, Tuple
+
 import numpy as np
-import torch
 import supervision as sv
-from typing import Optional, Tuple, Any
+import torch
 
 from ..utils.config import VisionConfig
-from ..utils.exceptions import SegmentationError, DependencyError, handle_model_loading_error
-from ..utils.utils import setup_logging, get_optimal_device, Timer, validate_image
+from ..utils.exceptions import (
+    DependencyError,
+    SegmentationError,
+    handle_model_loading_error,
+)
+from ..utils.utils import Timer, get_optimal_device, setup_logging, validate_image
 
 # Handle optional dependencies gracefully
 try:
     from sam2.sam2_image_predictor import SAM2ImagePredictor
+
     SAM2_AVAILABLE = True
 except (ModuleNotFoundError, ImportError):
     SAM2ImagePredictor = None
@@ -17,6 +23,7 @@ except (ModuleNotFoundError, ImportError):
 
 try:
     from ultralytics import FastSAM
+
     FASTSAM_AVAILABLE = True
 except (ModuleNotFoundError, ImportError):
     FastSAM = None
@@ -117,15 +124,23 @@ class ObjectSegmenter:
         else:
             return self._segment_box_with_sam2(box, img_work)
 
-    def _segment_box_with_fastsam(self, box: torch.Tensor, img_work: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def _segment_box_with_fastsam(
+        self, box: torch.Tensor, img_work: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Perform segmentation using FastSAM."""
         input_box = box.detach().cpu().numpy().tolist()
         imgsz = (img_work.shape[0] // 32) * 32 + 32
 
         try:
             results = self._segmenter(
-                img_work, device=self._device, retina_masks=True, imgsz=imgsz,
-                conf=0.4, iou=0.9, bboxes=input_box, verbose=False
+                img_work,
+                device=self._device,
+                retina_masks=True,
+                imgsz=imgsz,
+                conf=0.4,
+                iou=0.9,
+                bboxes=input_box,
+                verbose=False,
             )
             masks = results[0].masks
             if masks is not None:
@@ -137,7 +152,9 @@ class ObjectSegmenter:
                 self._logger.error(f"FastSAM error: {e}")
             return None, None
 
-    def _segment_box_with_sam2(self, box: torch.Tensor, img_work: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def _segment_box_with_sam2(
+        self, box: torch.Tensor, img_work: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Perform segmentation using SAM2."""
         try:
             self._segmenter.set_image(img_work)
@@ -163,10 +180,18 @@ class ObjectSegmenter:
         full_mask[y_min:y_max, x_min:x_max] = mask_8u[y_min:y_max, x_min:x_max]
         return full_mask
 
-    def get_segmenter(self) -> Optional[Any]: return self._segmenter
-    def get_model_id(self) -> Optional[str]: return self._model_id
-    def is_available(self) -> bool: return self._segmenter is not None
+    def get_segmenter(self) -> Optional[Any]:
+        return self._segmenter
+
+    def get_model_id(self) -> Optional[str]:
+        return self._model_id
+
+    def is_available(self) -> bool:
+        return self._segmenter is not None
 
     # Deprecated
-    def segmenter(self): return self.get_segmenter()
-    def verbose(self): return self._verbose
+    def segmenter(self):
+        return self.get_segmenter()
+
+    def verbose(self):
+        return self._verbose

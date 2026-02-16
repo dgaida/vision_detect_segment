@@ -5,15 +5,16 @@ Asynchronous processing module for vision detection with proper queue management
 backpressure handling, and worker thread coordination.
 """
 
-import threading
+import logging
 import queue
+import threading
 import time
-from typing import Optional, Dict, Any, List, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
+
 import numpy as np
-import logging
-from concurrent.futures import ThreadPoolExecutor
 
 
 class ProcessingState(Enum):

@@ -6,17 +6,22 @@ Note: These tests may take longer to run and are marked with 'slow'.
 Run with: pytest tests/integration/test_integration_memory.py -v -m slow
 """
 
-import pytest
-import numpy as np
-import time
 import gc
-import torch
+import time
 from unittest.mock import Mock, patch
 
-from vision_detect_segment.core.visualcortex import VisualCortex
+import numpy as np
+import pytest
+import torch
+
 from vision_detect_segment.core.object_detector import ObjectDetector
+from vision_detect_segment.core.visualcortex import VisualCortex
 from vision_detect_segment.utils.config import create_test_config
-from vision_detect_segment.utils.utils import create_test_image, get_memory_usage, clear_gpu_cache
+from vision_detect_segment.utils.utils import (
+    clear_gpu_cache,
+    create_test_image,
+    get_memory_usage,
+)
 
 
 @pytest.mark.slow

@@ -2,9 +2,10 @@
 Extended unit tests for ObjectTracker class to increase coverage.
 """
 
-import pytest
-import numpy as np
 from unittest.mock import Mock
+
+import numpy as np
+import pytest
 import supervision as sv
 
 from vision_detect_segment.core.object_tracker import ObjectTracker

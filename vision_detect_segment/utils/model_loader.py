@@ -1,14 +1,15 @@
 import hashlib
+import logging
 from pathlib import Path
 from typing import Dict
-import logging
 
 logger = logging.getLogger(__name__)
 
 # Predefined checksums for known models
 MODEL_CHECKSUMS: Dict[str, str] = {
-    "yoloe-11s-seg.pt": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", # Example
+    "yoloe-11s-seg.pt": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",  # Example
 }
+
 
 def verify_model_checksum(model_path: Path, expected_checksum_str: str) -> bool:
     """
@@ -29,7 +30,7 @@ def verify_model_checksum(model_path: Path, expected_checksum_str: str) -> bool:
 
     try:
         hasher = hashlib.new(algorithm)
-        with open(model_path, 'rb') as f:
+        with open(model_path, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 hasher.update(chunk)
 
@@ -38,6 +39,7 @@ def verify_model_checksum(model_path: Path, expected_checksum_str: str) -> bool:
     except Exception as e:
         logger.error(f"Error calculating checksum: {e}")
         return False
+
 
 def get_model_path_safe(model_id: str, model_path: str) -> str:
     """

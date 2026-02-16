@@ -3,11 +3,12 @@ Configuration module for vision_detect_segment package.
 Contains all configurable parameters and default values.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-import torch
 import copy
 import os
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+import torch
 
 
 @dataclass
@@ -94,24 +95,139 @@ class VisionConfig:
     @staticmethod
     def _get_default_labels() -> List[str]:
         """Get the default set of object labels."""
-        geometric_shapes = ["blue circle", "blue square", "blue box", "blue cube", "red circle", "red square", "red box", "red cube", "green circle", "green coin", "green cylinder", "green square", "orange cube", "purple cube", "yellow cube", "green cube"]
-        office_items = ["black pen", "black ballpoint pen", "pen", "pencil", "book", "computer mouse", "usb stick", "remote control", "battery", "batteries", "screwdriver", "screw"]
-        food_items = ["chocolate bar", "bounty", "snickers", "mars", "milky way", "twix", "snickers bar", "sweets", "mandarin", "apple", "coke can"]
+        geometric_shapes = [
+            "blue circle",
+            "blue square",
+            "blue box",
+            "blue cube",
+            "red circle",
+            "red square",
+            "red box",
+            "red cube",
+            "green circle",
+            "green coin",
+            "green cylinder",
+            "green square",
+            "orange cube",
+            "purple cube",
+            "yellow cube",
+            "green cube",
+        ]
+        office_items = [
+            "black pen",
+            "black ballpoint pen",
+            "pen",
+            "pencil",
+            "book",
+            "computer mouse",
+            "usb stick",
+            "remote control",
+            "battery",
+            "batteries",
+            "screwdriver",
+            "screw",
+        ]
+        food_items = [
+            "chocolate bar",
+            "bounty",
+            "snickers",
+            "mars",
+            "milky way",
+            "twix",
+            "snickers bar",
+            "sweets",
+            "mandarin",
+            "apple",
+            "coke can",
+        ]
         lighting_items = ["lighter", "cigarette lighter", "philips batteries"]
         return geometric_shapes + office_items + food_items + lighting_items
 
 
 # Predefined model configurations
 MODEL_CONFIGS = {
-    "owlv2": ModelConfig(name="owlv2", confidence_threshold=0.3, model_params={"model_path": "google/owlv2-base-patch16-ensemble", "requires_transformers": True}),
-    "yolo-world": ModelConfig(name="yolo-world", confidence_threshold=0.25, model_params={"model_path": "yolov8x-worldv2.pt", "requires_ultralytics": True}),
-    "grounding_dino": ModelConfig(name="grounding_dino", confidence_threshold=0.3, model_params={"model_path": "IDEA-Research/grounding-dino-base", "requires_transformers": True, "text_preprocessing": {"lowercase": True, "join_with_periods": True}}),
-    "yoloe-11s": ModelConfig(name="yoloe-11s", confidence_threshold=0.25, model_params={"model_path": "yoloe-11s-seg.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": True}),
-    "yoloe-11m": ModelConfig(name="yoloe-11m", confidence_threshold=0.25, model_params={"model_path": "yoloe-11m-seg.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": True}),
-    "yoloe-11l": ModelConfig(name="yoloe-11l", confidence_threshold=0.25, model_params={"model_path": "yoloe-11l-seg.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": True}),
-    "yoloe-11s-pf": ModelConfig(name="yoloe-11s-pf", confidence_threshold=0.25, model_params={"model_path": "yoloe-11s-seg-pf.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": False, "is_prompt_free": True}),
-    "yoloe-11m-pf": ModelConfig(name="yoloe-11m-pf", confidence_threshold=0.25, model_params={"model_path": "yoloe-11m-seg-pf.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": False, "is_prompt_free": True}),
-    "yoloe-11l-pf": ModelConfig(name="yoloe-11l-pf", confidence_threshold=0.25, model_params={"model_path": "yoloe-11l-seg-pf.pt", "requires_ultralytics": True, "has_builtin_segmentation": True, "supports_prompts": False, "is_prompt_free": True}),
+    "owlv2": ModelConfig(
+        name="owlv2",
+        confidence_threshold=0.3,
+        model_params={"model_path": "google/owlv2-base-patch16-ensemble", "requires_transformers": True},
+    ),
+    "yolo-world": ModelConfig(
+        name="yolo-world",
+        confidence_threshold=0.25,
+        model_params={"model_path": "yolov8x-worldv2.pt", "requires_ultralytics": True},
+    ),
+    "grounding_dino": ModelConfig(
+        name="grounding_dino",
+        confidence_threshold=0.3,
+        model_params={
+            "model_path": "IDEA-Research/grounding-dino-base",
+            "requires_transformers": True,
+            "text_preprocessing": {"lowercase": True, "join_with_periods": True},
+        },
+    ),
+    "yoloe-11s": ModelConfig(
+        name="yoloe-11s",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11s-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": True,
+        },
+    ),
+    "yoloe-11m": ModelConfig(
+        name="yoloe-11m",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11m-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": True,
+        },
+    ),
+    "yoloe-11l": ModelConfig(
+        name="yoloe-11l",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11l-seg.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": True,
+        },
+    ),
+    "yoloe-11s-pf": ModelConfig(
+        name="yoloe-11s-pf",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11s-seg-pf.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": False,
+            "is_prompt_free": True,
+        },
+    ),
+    "yoloe-11m-pf": ModelConfig(
+        name="yoloe-11m-pf",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11m-seg-pf.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": False,
+            "is_prompt_free": True,
+        },
+    ),
+    "yoloe-11l-pf": ModelConfig(
+        name="yoloe-11l-pf",
+        confidence_threshold=0.25,
+        model_params={
+            "model_path": "yoloe-11l-seg-pf.pt",
+            "requires_ultralytics": True,
+            "has_builtin_segmentation": True,
+            "supports_prompts": False,
+            "is_prompt_free": True,
+        },
+    ),
 }
 
 

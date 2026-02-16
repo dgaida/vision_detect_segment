@@ -7,16 +7,16 @@ Prerequisites:
 - Run with: pytest tests/integration/test_integration_redis.py -v --redis
 """
 
-import pytest
 import time
 from unittest.mock import patch
+
+import pytest
 import redis
+from redis_robot_comm import RedisImageStreamer, RedisMessageBroker
 
 from vision_detect_segment.core.visualcortex import VisualCortex
 from vision_detect_segment.utils.config import create_test_config
 from vision_detect_segment.utils.utils import create_test_image
-
-from redis_robot_comm import RedisImageStreamer, RedisMessageBroker
 
 
 @pytest.fixture

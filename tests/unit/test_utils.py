@@ -2,31 +2,35 @@
 Unit tests for utility functions.
 """
 
-import pytest
-import numpy as np
-import cv2
+import tempfile
 import time
 from pathlib import Path
-import tempfile
+
+import cv2
+import numpy as np
+import pytest
 import torch
 
+from vision_detect_segment.utils.exceptions import (
+    ConfigurationError,
+    ImageProcessingError,
+)
 from vision_detect_segment.utils.utils import (
-    validate_image,
-    resize_image,
-    create_test_image,
-    load_image_safe,
-    get_optimal_device,
+    Timer,
     check_dependencies,
-    validate_model_requirements,
+    clear_gpu_cache,
+    convert_bbox_format,
+    create_test_image,
+    format_detection_results,
+    get_memory_usage,
+    get_optimal_device,
+    load_image_safe,
+    resize_image,
     validate_bbox,
     validate_confidence_threshold,
-    Timer,
-    format_detection_results,
-    convert_bbox_format,
-    get_memory_usage,
-    clear_gpu_cache,
+    validate_image,
+    validate_model_requirements,
 )
-from vision_detect_segment.utils.exceptions import ImageProcessingError, ConfigurationError
 
 
 class TestValidateImage:

@@ -6,13 +6,14 @@ Advanced Redis stream inspection and debugging tool.
 Provides real-time monitoring, analysis, and troubleshooting capabilities.
 """
 
+import json
 import sys
 import time
-import json
-import numpy as np
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 import redis
 
 
