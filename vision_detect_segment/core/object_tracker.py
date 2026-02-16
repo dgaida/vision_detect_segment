@@ -4,7 +4,7 @@ Unified object tracking interface with progressive label stabilization.
 
 import numpy as np
 import supervision as sv
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from collections import Counter, defaultdict
 
 # --- Compatibility import for ByteTrack ---

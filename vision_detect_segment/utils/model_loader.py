@@ -1,7 +1,6 @@
 import hashlib
-import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 import logging
 
 logger = logging.getLogger(__name__)

@@ -1,13 +1,11 @@
 import numpy as np
-import cv2
 import torch
 import supervision as sv
-from typing import Optional, Tuple, List, Any
-import logging
+from typing import Optional, Tuple, Any
 
 from ..utils.config import VisionConfig
-from ..utils.exceptions import SegmentationError, DependencyError, ModelLoadError, handle_model_loading_error
-from ..utils.utils import setup_logging, get_optimal_device, Timer, validate_image, clear_gpu_cache
+from ..utils.exceptions import SegmentationError, DependencyError, handle_model_loading_error
+from ..utils.utils import setup_logging, get_optimal_device, Timer, validate_image
 
 # Handle optional dependencies gracefully
 try:
@@ -135,7 +133,8 @@ class ObjectSegmenter:
                 return mask_8u, mask_8u > 0
             return None, None
         except Exception as e:
-            if self._verbose: self._logger.error(f"FastSAM error: {e}")
+            if self._verbose:
+                self._logger.error(f"FastSAM error: {e}")
             return None, None
 
     def _segment_box_with_sam2(self, box: torch.Tensor, img_work: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
@@ -151,7 +150,8 @@ class ObjectSegmenter:
             mask_8u = (mask > 0).astype(np.uint8) * 255
             return mask_8u, mask > 0
         except Exception as e:
-            if self._verbose: self._logger.error(f"SAM2 error: {e}")
+            if self._verbose:
+                self._logger.error(f"SAM2 error: {e}")
             return None, None
 
     @staticmethod

@@ -1,6 +1,5 @@
-from typing import TypedDict, List, Optional, Tuple, Any, Protocol, Dict
+from typing import TypedDict, List, Optional, Any, Protocol, Dict
 import numpy as np
-import torch
 
 class BoundingBox(TypedDict):
     x_min: int

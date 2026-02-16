@@ -1,6 +1,5 @@
 import numpy as np
-import torch
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from ultralytics import YOLOE
 from .base import DetectionBackend
 from ...utils.config import MODEL_CONFIGS
@@ -72,7 +71,7 @@ class YOLOEBackend(DetectionBackend):
         return True
 
     def add_label(self, label: str) -> None:
-        if label.lower() not in [l.lower() for l in self.object_labels]:
+        if label.lower() not in [lbl.lower() for lbl in self.object_labels]:
             self.object_labels.append(label.lower())
             model_config = MODEL_CONFIGS.get(self.model_id)
             if self.model and model_config and not model_config.model_params.get("is_prompt_free", False):

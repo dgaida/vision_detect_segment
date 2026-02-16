@@ -2,7 +2,7 @@ import numpy as np
 import time
 import base64
 import os
-from typing import List, Dict, Optional, Tuple, Union, Any
+from typing import List, Dict, Optional, Union, Any
 import torch
 import supervision as sv
 from datetime import datetime
@@ -12,11 +12,10 @@ from .object_tracker import ObjectTracker
 from .detectors.owlv2 import Owlv2Backend, GroundingDinoBackend
 from .detectors.yolo import YOLOWorldBackend
 from .detectors.yoloe import YOLOEBackend
-from .interfaces import DetectedObject, BoundingBox
 
 from redis_robot_comm import RedisMessageBroker
 
-from ..utils.config import VisionConfig, MODEL_CONFIGS
+from ..utils.config import VisionConfig
 from ..utils.exceptions import (
     ModelLoadError,
     handle_model_loading_error,
@@ -348,7 +347,8 @@ class ObjectDetector:
         clean_objects = []
         for obj in objects:
             clean_obj = obj.copy()
-            if "results" in clean_obj: del clean_obj["results"]
+            if "results" in clean_obj:
+                del clean_obj["results"]
             clean_objects.append(clean_obj)
 
         metadata = {
@@ -428,8 +428,10 @@ class ObjectDetector:
         return detected_objects
     @staticmethod
     def _convert_labels_to_class_ids(labels: List[str]) -> np.ndarray:
-        return np.array([hash(l.lower()) % 100 for l in labels])
-    def _create_supervision_detections(self, results, objects, track_ids=None): self._update_supervision_state(objects, track_ids)
+        return np.array([hash(label.lower()) % 100 for label in labels])
+
+    def _create_supervision_detections(self, results, objects, track_ids=None):
+        self._update_supervision_state(objects, track_ids)
     def _create_supervision_detections_from_results(self, results, labels, track_ids=None):
         objects = [{"bbox": {"x_min": int(box[0]), "y_min": int(box[1]), "x_max": int(box[2]), "y_max": int(box[3])}, "confidence": float(score), "label": labels[i]} for i, (box, score) in enumerate(zip(results["boxes"], results["scores"]))]
         self._update_supervision_state(objects, track_ids)

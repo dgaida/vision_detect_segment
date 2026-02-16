@@ -1,24 +1,16 @@
 import numpy as np
-from typing import List, Optional, Dict, Any, Tuple
-import torch
+from typing import List, Optional, Dict, Any
 import supervision as sv
 import cv2
 import copy
 import threading
 import time
-import logging
 import gc
 
 from .object_detector import ObjectDetector
-from .interfaces import DetectedObject
 from ..utils.config import VisionConfig, get_default_config
 from ..utils.exceptions import (
-    ImageProcessingError,
     DetectionError,
-    RedisConnectionError,
-    DependencyError,
-    handle_redis_error,
-    handle_detection_error,
 )
 from ..utils.utils import (
     setup_logging,
@@ -26,7 +18,6 @@ from ..utils.utils import (
     Timer,
     validate_image,
     resize_image,
-    format_detection_results,
     clear_gpu_cache,
 )
 from ..utils.redis_helpers import redis_operation
@@ -305,7 +296,7 @@ class VisualCortex:
         """Ensure cleanup on deletion."""
         try:
             self.cleanup(force=True)
-        except:
+        except Exception:
             pass
 
     # Public API methods
@@ -382,7 +373,7 @@ class VisualCortex:
                             current = self._config.get_object_labels()[0]
                             if set(new_labels) != set(current):
                                 self._update_detector_labels(new_labels)
-                    except:
+                    except Exception:
                         pass
                     last_check = time.time()
                 time.sleep(0.1)

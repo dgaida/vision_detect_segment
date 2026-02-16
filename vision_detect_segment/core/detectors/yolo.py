@@ -1,6 +1,5 @@
 import numpy as np
-import torch
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from ultralytics import YOLO
 from .base import DetectionBackend
 from ...utils.config import MODEL_CONFIGS
@@ -59,7 +58,7 @@ class YOLOWorldBackend(DetectionBackend):
         return False
 
     def add_label(self, label: str) -> None:
-        if label.lower() not in [l.lower() for l in self.object_labels]:
+        if label.lower() not in [lbl.lower() for lbl in self.object_labels]:
             self.object_labels.append(label.lower())
             if self.model:
                 self.model.set_classes(self.object_labels)

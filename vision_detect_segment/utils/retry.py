@@ -1,6 +1,6 @@
 import time
 import functools
-from typing import Callable, Any, Tuple, Type
+from typing import Callable, Tuple, Type
 
 def retry_with_backoff(
     max_attempts: int = 3,

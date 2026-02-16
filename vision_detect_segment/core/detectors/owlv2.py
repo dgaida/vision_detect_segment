@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Union
 from transformers import Owlv2Processor, Owlv2ForObjectDetection, AutoProcessor, AutoModelForZeroShotObjectDetection
 from .base import DetectionBackend
 from ...utils.config import MODEL_CONFIGS
@@ -18,7 +18,7 @@ class TransformerBackend(DetectionBackend):
 
     def _preprocess_labels(self, labels: List[str], model_id: str) -> Union[List[str], str]:
         if model_id == "grounding_dino":
-            return ". ".join([l.lower() for l in labels]) + "."
+            return ". ".join([label.lower() for label in labels]) + "."
         return labels
 
     def load_model(self) -> None:
@@ -82,7 +82,7 @@ class TransformerBackend(DetectionBackend):
         return False
 
     def add_label(self, label: str) -> None:
-        if label.lower() not in [l.lower() for l in self.object_labels]:
+        if label.lower() not in [lbl.lower() for lbl in self.object_labels]:
             self.object_labels.append(label.lower())
             self.processed_labels = self._preprocess_labels(self.object_labels, self.model_id)
 
