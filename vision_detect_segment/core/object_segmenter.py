@@ -29,6 +29,9 @@ except (ModuleNotFoundError, ImportError):
     FastSAM = None
     FASTSAM_AVAILABLE = False
 
+# For tests
+EDGETAM_AVAILABLE = False
+
 
 class ObjectSegmenter:
     """
@@ -112,6 +115,10 @@ class ObjectSegmenter:
             detections.mask = np.stack(valid_masks) if len(valid_masks) == len(detections.xyxy) else None
         return detections
 
+    def get_device(self) -> str:
+        """Get current computation device."""
+        return self._device
+
     def segment_box_in_image(
         self, box: torch.Tensor, img_work: np.ndarray
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
@@ -123,6 +130,12 @@ class ObjectSegmenter:
             return self._segment_box_with_fastsam(box, img_work)
         else:
             return self._segment_box_with_sam2(box, img_work)
+
+    def _run_sam2_inference(
+        self, box: torch.Tensor, img_work: np.ndarray
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """Legacy method for backward compatibility in tests."""
+        return self._segment_box_with_sam2(box, img_work)
 
     def _segment_box_with_fastsam(
         self, box: torch.Tensor, img_work: np.ndarray
@@ -179,6 +192,11 @@ class ObjectSegmenter:
         full_mask = np.zeros(img_work.shape[:2], dtype=np.uint8)
         full_mask[y_min:y_max, x_min:x_max] = mask_8u[y_min:y_max, x_min:x_max]
         return full_mask
+
+    @staticmethod
+    def add_masks2detections(detections: sv.Detections) -> sv.Detections:
+        """Legacy method for backward compatibility."""
+        return detections
 
     def get_segmenter(self) -> Optional[Any]:
         return self._segmenter

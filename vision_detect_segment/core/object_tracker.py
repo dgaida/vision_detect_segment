@@ -142,6 +142,10 @@ class ObjectTracker:
             self._stabilized_labels.pop(track_id, None)
             self._frame_counts.pop(track_id, None)
 
+    def get_all_track_stats(self) -> Dict[int, Dict[str, Any]]:
+        """Get tracking statistics for all active tracks."""
+        return {track_id: self.get_track_info(track_id) for track_id in self._label_history.keys()}
+
     def get_track_info(self, track_id: int) -> Optional[Dict[str, Any]]:
         """Get tracking information for a specific track ID."""
         if track_id not in self._label_history:
@@ -177,3 +181,8 @@ class ObjectTracker:
         if not self._tracker or not self.enable_tracking:
             return detections
         return self._tracker.update_with_detections(detections)
+
+    @property
+    def verbose(self) -> bool:
+        """Legacy property for backward compatibility."""
+        return self._verbose

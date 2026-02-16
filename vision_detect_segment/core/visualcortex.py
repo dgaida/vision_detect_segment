@@ -72,6 +72,8 @@ class VisualCortex:
         self._processed_frames = 0
         self._publish_detections_during_movement = publish_detections_during_movement
         self._verbose = verbose
+        self._streamer: Optional[RedisImageStreamer] = None
+        self._annotated_streamer: Optional[RedisImageStreamer] = None
 
         # Config initialization
         self._config = config or get_default_config(objdetect_model_id)
@@ -114,7 +116,13 @@ class VisualCortex:
     def _initialize_redis_streamers(self) -> None:
         """Initialize both input and annotated image streamers with robust connection testing."""
         # Input image streamer
-        with redis_operation("initialization", self._config.redis.host, self._config.redis.port, self._logger):
+        with redis_operation(
+            "initialization",
+            self._config.redis.host,
+            self._config.redis.port,
+            self._logger,
+            raise_on_error=self._config.redis.fail_on_error,
+        ):
             self._streamer = RedisImageStreamer(
                 host=self._config.redis.host,
                 port=self._config.redis.port,
@@ -299,6 +307,45 @@ class VisualCortex:
             pass
 
     # Public API methods
+    def get_object_labels(self) -> List[List[str]]:
+        """Get current object labels."""
+        return self._config.get_object_labels()
+
+    def get_processed_frames_count(self) -> int:
+        """Get processed frames count."""
+        return self._processed_frames
+
+    def get_device(self) -> str:
+        """Get the current computation device."""
+        return self._device
+
+    def clear_cache(self) -> None:
+        """Clear GPU cache and reset internal state."""
+        clear_gpu_cache()
+
+    def get_memory_usage(self) -> Dict[str, Any]:
+        """Get current memory usage information."""
+        try:
+            from ..utils.utils import get_memory_usage
+
+            return get_memory_usage()
+        except Exception:
+            return {}
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get processing statistics."""
+        return {
+            "processed_frames": self._processed_frames,
+            "device": self._device,
+            "model_id": self._objdetect_model_id,
+            "has_current_image": self._img_work is not None,
+            "current_detections_count": len(self._detected_objects),
+            "redis_available": self._streamer is not None,
+            "annotated_streamer_available": self._annotated_streamer is not None,
+            "annotated_publishing_enabled": self._publish_annotated,
+            "detector_available": self._object_detector is not None,
+        }
+
     def get_current_image(self, resize: bool = True) -> Optional[np.ndarray]:
         """Get current raw image, optionally resized."""
         if self._img_work is None:
@@ -410,5 +457,17 @@ class VisualCortex:
         return self.get_detected_objects()
 
     @property
+    def object_labels(self):
+        return self.get_object_labels()
+
+    @property
     def processed_frames(self):
         return self._processed_frames
+
+    def img_work(self, resize: bool = True) -> Optional[np.ndarray]:
+        """Legacy method for backward compatibility."""
+        return self.get_current_image(resize)
+
+    def annotated_frame(self) -> Optional[np.ndarray]:
+        """Legacy method for backward compatibility."""
+        return self.get_annotated_image()
