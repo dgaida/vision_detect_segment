@@ -18,6 +18,7 @@ class TestObjectDetectorLabelStabilization:
     """Tests for label stabilization feature with tracking."""
 
     @pytest.fixture
+    @pytest.mark.slow
     def detector_with_tracking(self):
         """Create detector with tracking enabled."""
         config = create_test_config()
@@ -97,6 +98,7 @@ class TestObjectDetectorYOLOE:
     """Tests specific to YOLOE detection and segmentation."""
 
     @pytest.fixture
+    @pytest.mark.slow
     def yoloe_detector(self):
         """Create YOLOE detector."""
         config = create_test_config()
@@ -184,6 +186,7 @@ class TestObjectDetectorYOLOE:
         assert len(results) == 1
         assert results[0]["has_mask"] is False
 
+    @pytest.mark.slow
     def test_yoloe_without_tracking(self):
         """Test YOLOE detection with tracking disabled."""
         config = create_test_config()
@@ -217,6 +220,7 @@ class TestObjectDetectorYOLOTracking:
     """Tests for YOLO-specific tracking functionality."""
 
     @pytest.fixture
+    @pytest.mark.slow
     def yolo_detector_tracked(self):
         """Create YOLO detector with tracking."""
         config = create_test_config()
@@ -287,6 +291,7 @@ class TestObjectDetectorTransformerTracking:
     """Tests for transformer model tracking with ByteTrack."""
 
     @pytest.fixture
+    @pytest.mark.slow
     def owlv2_with_tracking(self):
         """Create OWL-V2 detector with tracking."""
         config = create_test_config()
@@ -378,6 +383,7 @@ class TestObjectDetectorTransformerTracking:
 class TestObjectDetectorLabelManagement:
     """Tests for dynamic label management."""
 
+    @pytest.mark.slow
     def test_add_label_to_yoloe_prompted(self):
         """Test adding label to prompted YOLOE model."""
         config = create_test_config()
@@ -401,6 +407,7 @@ class TestObjectDetectorLabelManagement:
                 assert "dog" in detector._object_labels[0]
                 assert mock_model.set_classes.called
 
+    @pytest.mark.slow
     def test_add_label_to_yoloe_prompt_free(self):
         """Test adding label to prompt-free YOLOE model (should not update)."""
         config = create_test_config()
@@ -428,6 +435,7 @@ class TestObjectDetectorLabelManagement:
                 # set_classes should not be called for prompt-free
                 assert not mock_model.set_classes.called
 
+    @pytest.mark.slow
     def test_add_label_to_grounding_dino(self):
         """Test adding label updates preprocessed labels for Grounding-DINO."""
         config = create_test_config()
@@ -455,6 +463,7 @@ class TestObjectDetectorGetLabelTexts:
     """Tests for get_label_texts with various scenarios."""
 
     @pytest.fixture
+    @pytest.mark.slow
     def detector_for_labels(self):
         """Create detector for label text testing."""
         config = create_test_config()
@@ -537,6 +546,7 @@ class TestObjectDetectorSupervisionCreation:
     """Tests for supervision detection creation methods."""
 
     @pytest.fixture
+    @pytest.mark.slow
     def detector_for_supervision(self):
         """Create detector for supervision tests."""
         config = create_test_config()
@@ -592,6 +602,7 @@ class TestObjectDetectorSupervisionCreation:
 class TestObjectDetectorEdgeCases:
     """Tests for edge cases and error conditions."""
 
+    @pytest.mark.slow
     def test_detect_with_custom_threshold(self):
         """Test detection with custom confidence threshold."""
         config = create_test_config()
@@ -616,6 +627,7 @@ class TestObjectDetectorEdgeCases:
                 # Verify custom threshold was used
                 assert mock_detect.called
 
+    @pytest.mark.slow
     def test_detect_with_invalid_threshold(self):
         """Test detection with invalid threshold raises error."""
         config = create_test_config()
@@ -635,6 +647,7 @@ class TestObjectDetectorEdgeCases:
             with pytest.raises(Exception):  # ConfigurationError
                 detector.detect_objects(image, confidence_threshold=1.5)
 
+    @pytest.mark.slow
     def test_create_supervision_detections_empty_boxes(self):
         """Test creating supervision detections with no boxes."""
         config = create_test_config()
@@ -679,6 +692,7 @@ class TestObjectDetectorBackwardCompatibility:
     """Tests for deprecated methods."""
 
     @pytest.fixture
+    @pytest.mark.slow
     def detector(self):
         """Create basic detector."""
         config = create_test_config()

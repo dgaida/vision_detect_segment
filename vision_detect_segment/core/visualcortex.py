@@ -126,8 +126,6 @@ class VisualCortex:
             self._streamer = RedisImageStreamer(
                 host=self._config.redis.host,
                 port=self._config.redis.port,
-                password=self._config.redis.password,
-                ssl=self._config.redis.ssl,
                 stream_name=self._stream_name,
             )
             self._streamer.client.ping()
@@ -140,8 +138,6 @@ class VisualCortex:
                 self._annotated_streamer = RedisImageStreamer(
                     host=self._config.redis.host,
                     port=self._config.redis.port,
-                    password=self._config.redis.password,
-                    ssl=self._config.redis.ssl,
                     stream_name=self._annotated_stream_name,
                 )
                 self._annotated_streamer.client.ping()
