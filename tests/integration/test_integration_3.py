@@ -25,6 +25,7 @@ class TestEdgeCaseImages:
     """Test handling of edge case images."""
 
     @pytest.fixture
+    @pytest.mark.slow
     def detector_for_edge_cases(self):
         """Create detector for edge case testing."""
         config = create_test_config()
@@ -100,6 +101,7 @@ class TestEdgeCaseImages:
 class TestHighLoadScenarios:
     """Test system behavior under high load."""
 
+    @pytest.mark.slow
     def test_many_objects_in_frame(self):
         """Test detection with many objects in single frame."""
         config = create_test_config()
@@ -132,6 +134,7 @@ class TestHighLoadScenarios:
                 results = detector.detect_objects(image)
                 assert len(results) <= 50  # May be limited by max_detections
 
+    @pytest.mark.slow
     def test_rapid_frame_succession(self):
         """Test processing many frames in rapid succession."""
         config = create_test_config()
@@ -156,6 +159,7 @@ class TestHighLoadScenarios:
 
                 assert cortex._processed_frames == 100
 
+    @pytest.mark.slow
     def test_long_running_session(self):
         """Test stability over long running session."""
         config = create_test_config()
